@@ -1,24 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getGameResult } from '../../utils';
 import { motion } from 'motion/react';
-import { Coins, Rocket, ShieldAlert } from 'lucide-react';
+import { Rocket, ShieldAlert } from 'lucide-react';
 import { formatMoney } from '../../data';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
+
+import tntImg from '../../assets/images/tnt_block_1781074158589.png';
 
 interface CrashProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
   logLiveBet: (game: string, amount: number, result: 'win' | 'loss', mult: number) => void;
   toast: (msg: string, type: 'win' | 'lose' | 'info') => void;
   playSound: (win: boolean) => void;
+  antiCheatEnabled?: boolean;
 }
 
 export default function Crash({
+  user,
   balance,
   updateBalance,
   addXP,
   logLiveBet,
   toast,
-  playSound
+  playSound,
+  antiCheatEnabled
 }: CrashProps) {
   const [bet, setBet] = useState<number>(100);
   const [running, setRunning] = useState<boolean>(false);
@@ -38,6 +47,18 @@ export default function Crash({
 
   // Logic to generate crash threshold
   const generateCrashThreshold = () => {
+    // Rig logic: potentially force result
+    const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+    const isRiggedWin = getGameResult(50, user?.rigRate); // Base 50% for rig evaluation
+    
+    if (user?.rigRate !== null && user?.rigRate !== undefined) {
+      if (user.rigRate > 80) return 3.00 + Math.random() * 20.00;
+      if (user.rigRate < 20) return 1.00 + Math.random() * 0.15;
+    }
+
+    if (storedDiff === 'god') return 10.00 + Math.random() * 90.00;
+    if (storedDiff === 'rigged') return 1.00 + Math.random() * 0.10;
+
     const r = Math.random();
     if (r < 0.25) return 1.00 + Math.random() * 0.50; // Instacrash / low crash
     if (r < 0.60) return 1.30 + Math.random() * 1.50; // Moderate flight
@@ -118,8 +139,12 @@ export default function Crash({
 
   const handleLaunch = () => {
     if (running) return;
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -129,7 +154,7 @@ export default function Crash({
     setCashedOut(false);
     setCurrentMult(1.00);
     setLastResult(null);
-    setStatusMessage('Rocket is in flight! Cash out before crash!');
+    setStatusMessage('TNT Fuse is lit! Cash out before detonation!');
 
     runningRef.current = true;
     multRef.current = 1.00;
@@ -201,7 +226,7 @@ export default function Crash({
     const wonAmount = Math.floor(betRef.current * multRef.current);
     updateBalance(wonAmount);
     playSound(true);
-    toast(`🏆 Cashed out at ${multRef.current.toFixed(2)}x! +${wonAmount - betRef.current} donuts`, 'win');
+    toast(`🏆 Cashed out at ${multRef.current.toFixed(2)}x! +${wonAmount - betRef.current} money`, 'win');
     logLiveBet('Crash', wonAmount - betRef.current, 'win', multRef.current);
     setLastResult({ win: true, amount: wonAmount - betRef.current, multiplier: multRef.current });
     setStatusMessage('Cashed out successfully!');
@@ -237,7 +262,7 @@ export default function Crash({
       {/* Graph Area */}
       <div className="flex-1 flex flex-col p-6 bg-slate-950/40 relative">
         <div className="text-xs font-semibold text-slate-500 tracking-wider">
-          CRASH ROCKET LAUNCH
+          CRASH TNT FUSE LAUNCH
         </div>
 
         {/* Live Multiplier Display */}
@@ -263,9 +288,9 @@ export default function Crash({
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                className="opacity-5"
+                className="opacity-10"
               >
-                <Rocket className="w-32 h-32 text-purple-500" />
+                <img src={tntImg} className="w-32 h-32 object-contain" alt="TNT" />
               </motion.div>
             </div>
           )}
@@ -308,8 +333,8 @@ export default function Crash({
             </div>
             <div className="text-xs mt-1">
               {lastResult.win 
-                ? `You kept +${lastResult.amount} donuts at ${lastResult.multiplier.toFixed(2)}x` 
-                : `Rocket crashed at ${lastResult.multiplier.toFixed(2)}x. -${lastResult.amount} donuts.`}
+                ? `You kept +${lastResult.amount} money at ${lastResult.multiplier.toFixed(2)}x` 
+                : `Rocket crashed at ${lastResult.multiplier.toFixed(2)}x. -${lastResult.amount} money.`}
             </div>
           </motion.div>
         )}
@@ -325,49 +350,12 @@ export default function Crash({
           CASH OUT
         </button>
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Bet Amount
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={running}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick multipliers */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !running && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !running && setBet(Math.min(balance, bet * 2))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !running && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !running && setBet(balance)}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={running} 
+        />
 
         {/* Live profits status block */}
         <div className="bg-slate-900/40 p-4 rounded-xl border border-white/5 flex flex-col gap-2 mt-2 text-xs">

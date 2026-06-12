@@ -6,75 +6,85 @@ import {
 import { MC_ICONS } from '../data';
 
 // Import game thumbnails for active build bundling
-import coinFlipThumb from '../assets/images/coin_flip_thumbnail_1780942494738.png';
-import crashThumb from '../assets/images/rocket_crash_thumbnail_1780942506080.png';
-import minesThumb from '../assets/images/minesweeper_thumbnail_1780942520030.png';
-import rouletteThumb from '../assets/images/roulette_thumbnail_1780942530471.png';
-import plinkoThumb from '../assets/images/plinko_thumbnail_1780942541651.png';
-import blackjackThumb from '../assets/images/blackjack_thumbnail_1780942556108.png';
-import diceThumb from '../assets/images/dice_roll_thumbnail_1780942570496.png';
-import towersThumb from '../assets/images/towers_thumbnail_1780942582979.png';
-import chickenThumb from '../assets/images/chicken_road_thumbnail_1780942594765.png';
-import jackpotThumb from '../assets/images/jackpot_thumbnail_1780942628067.png';
+import coinFlipThumb from '../assets/images/mine_coinflip_thumb_1781191906480.jpg';
+import crashThumb from '../assets/images/mine_crash_thumb_1781191925076.jpg';
+import minesThumb from '../assets/images/mine_mines_thumb_1781191936856.jpg';
+import rouletteThumb from '../assets/images/mine_roulette_thumb_1781191951757.jpg';
+import plinkoThumb from '../assets/images/mine_plinko_thumb_1781191969697.jpg';
+import blackjackThumb from '../assets/images/mine_blackjack_thumb_1781192018235.jpg';
+import diceThumb from '../assets/images/mine_dice_thumb_1781192037357.jpg';
+import towersThumb from '../assets/images/mine_towers_thumb_1781192055257.jpg';
+import jackpotThumb from '../assets/images/mine_jackpot_thumb_1781191984580.jpg';
 
 interface SidebarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
-  openGame: (game: string) => void;
   discordInvite: string;
   onOpenWallet: () => void;
   logoUrl: string;
+  userRole?: 'member' | 'helper' | 'mod' | 'dev' | 'admin' | 'owner';
 }
 
 export default function Sidebar({
   currentTab,
   setCurrentTab,
-  openGame,
   discordInvite,
   onOpenWallet,
-  logoUrl
+  logoUrl,
+  userRole = 'member'
 }: SidebarProps) {
   
+  const isAdmin = userRole === 'admin' || userRole === 'owner';
+  const isStaff = userRole === 'helper' || userRole === 'mod' || userRole === 'dev' || isAdmin;
+
   const menuItems = [
     { id: 'home', label: 'Home Feed', icon: <Home className="w-4 h-4" /> },
     { id: 'coinflip', label: 'Coinflip', icon: <img src={coinFlipThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Coinflip" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'crash', label: 'Crash Flight', icon: <img src={crashThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Crash" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'mines', label: 'Mine Picker', icon: <img src={minesThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Mines" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'roulette', label: 'Sector Roulette', icon: <img src={rouletteThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Roulette" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'plinko', label: 'Plinko Drop', icon: <img src={plinkoThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Plinko" referrerPolicy="no-referrer" />, isGame: true },
+    { id: 'crash', label: 'Crash', icon: <img src={crashThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Crash" referrerPolicy="no-referrer" />, isGame: true },
+    { id: 'mines', label: 'Mines', icon: <img src={minesThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Mines" referrerPolicy="no-referrer" />, isGame: true },
+    { id: 'roulette', label: 'Roulette', icon: <img src={rouletteThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Roulette" referrerPolicy="no-referrer" />, isGame: true },
+    { id: 'plinko', label: 'Plinko', icon: <img src={plinkoThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Plinko" referrerPolicy="no-referrer" />, isGame: true },
     { id: 'blackjack', label: 'Blackjack', icon: <img src={blackjackThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Blackjack" referrerPolicy="no-referrer" />, isGame: true },
     { id: 'dice', label: 'Dice Roll', icon: <img src={diceThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Dice" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'towers', label: 'Tower Climb', icon: <img src={towersThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Towers" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'chicken', label: 'Chicken Road', icon: <img src={chickenThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Chicken" referrerPolicy="no-referrer" />, isGame: true },
-    { id: 'jackpot', label: 'Jackpot Pot', icon: <img src={jackpotThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Jackpot" referrerPolicy="no-referrer" />, isGame: true },
+    { id: 'towers', label: 'Towers', icon: <img src={towersThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Towers" referrerPolicy="no-referrer" />, isGame: true },
+    { id: 'jackpot', label: 'Jackpot', icon: <img src={jackpotThumb} className="w-4 h-4 rounded-md object-cover border border-white/10 group-hover:border-purple-500/50 transition-all duration-300" alt="Jackpot" referrerPolicy="no-referrer" />, isGame: true },
     { id: 'cases', label: 'Loot Cases', icon: <Package className="w-4 h-4" />, isBadge: 'NEW' },
     { id: 'casebattle', label: 'Case Battles', icon: <Swords className="w-4 h-4" />, isBadge: 'NEW' },
     { id: 'leaderboard', label: 'Leaderboards', icon: <Trophy className="w-4 h-4" /> },
-    { id: 'rewards', label: 'VIP rewards', icon: <Gift className="w-4 h-4" /> }
-  ];
+    { id: 'rewards', label: 'VIP rewards', icon: <Gift className="w-4 h-4" /> },
+    { id: 'donutshop', label: 'Donut Store', icon: <Sparkles className="w-4 h-4 text-amber-400" />, isBadge: 'IRL' },
+    { id: 'helper', label: 'Helper Panel', icon: <Shield className="w-4 h-4 text-blue-400" />, hidden: !isStaff },
+    { id: 'admin', label: 'Admin Panel', icon: <Shield className="w-4 h-4 text-rose-500" />, hidden: !isAdmin }
+  ].filter(item => !item.hidden);
 
   return (
     <aside className="w-56 bg-slate-950/80 border-r border-white/5 flex flex-col h-full flex-shrink-0 relative overflow-y-auto">
       {/* Brand logo container */}
       <div className="p-4 border-b border-white/5 flex items-center gap-3">
-        <img 
-          src={logoUrl} 
-          alt="Logo" 
-          referrerPolicy="no-referrer"
-          className="w-8 h-8 rounded-xl object-contain animate-pulse border border-purple-500/20 shadow-purple-500/10 shadow" 
-        />
+        {logoUrl ? (
+          <img 
+            src={logoUrl} 
+            alt="LunarSpin Logo" 
+            referrerPolicy="no-referrer"
+            className="w-8 h-8 rounded-xl object-contain border border-purple-500/30 shadow-purple-500/20 shadow animate-pulse" 
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-lg shadow-purple-500/20 shadow animate-pulse">
+            🌙
+          </div>
+        )}
         <div className="flex flex-col">
-          <span className="font-extrabold text-[15px] tracking-tight bg-gradient-to-r from-white to-purple-400 bg-clip-text text-transparent uppercase">
+          <span className="font-extrabold text-[15px] tracking-tight bg-gradient-to-r from-white to-purple-400 bg-clip-text text-transparent uppercase font-mono">
             LunarSpin
           </span>
-          <span className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
-            PREMIUM CASINO
+          <span className="text-[8px] text-purple-400 font-bold uppercase tracking-widest mt-0.5 font-mono">
+            Minecraft Casino
           </span>
         </div>
       </div>
 
       <nav className="p-2 flex flex-col gap-1">
-        <span className="text-[9px] text-slate-600 font-extrabold uppercase tracking-widest px-3 py-2">
+        <span className="text-[9px] text-slate-600 font-extrabold uppercase tracking-widest px-3 py-2 font-mono">
           Category Directory
         </span>
         {menuItems.map((item) => {
@@ -82,11 +92,7 @@ export default function Sidebar({
           return (
             <button
               onClick={() => {
-                if (item.isGame) {
-                  openGame(item.id);
-                } else {
-                  setCurrentTab(item.id);
-                }
+                setCurrentTab(item.id);
               }}
               key={item.id}
               className={`flex items-center gap-3 py-2.5 px-4 rounded-xl text-left text-xs font-semibold select-none transition-all cursor-pointer relative group

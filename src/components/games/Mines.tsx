@@ -1,24 +1,34 @@
 import React, { useState } from 'react';
+import { getGameResult } from '../../utils';
 import { motion } from 'motion/react';
-import { Coins, Sparkles, Gem, ShieldAlert } from 'lucide-react';
+import { Sparkles, Gem, ShieldAlert } from 'lucide-react';
 import { formatMoney } from '../../data';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
+
+import tntImg from '../../assets/images/tnt_block_1781074158589.png';
+import gemImg from '../../assets/images/diamond_gem_1781074170180.png';
 
 interface MinesProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
   logLiveBet: (game: string, amount: number, result: 'win' | 'loss', mult: number) => void;
   toast: (msg: string, type: 'win' | 'lose' | 'info') => void;
   playSound: (win: boolean) => void;
+  antiCheatEnabled?: boolean;
 }
 
 export default function Mines({
+  user,
   balance,
   updateBalance,
   addXP,
   logLiveBet,
   toast,
-  playSound
+  playSound,
+  antiCheatEnabled
 }: MinesProps) {
   const [bet, setBet] = useState<number>(100);
   const [minesCount, setMinesCount] = useState<number>(3);
@@ -40,10 +50,14 @@ export default function Mines({
     return parseFloat(Math.max(1.01, (1 / m) * 0.97).toFixed(2));
   };
 
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     if (active) return;
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -51,28 +65,48 @@ export default function Mines({
     updateBalance(-bet);
     addXP(Math.max(1, Math.floor(bet / 10)));
 
-    // Generate random layout of bombs and gems
-    const size = 25;
-    const bombIndices = new Set<number>();
-    while (bombIndices.size < minesCount) {
-      bombIndices.add(Math.floor(Math.random() * size));
+    const gridSize = 25;
+    let bombIndices = new Set<number>();
+
+    if ((window as any).antiCheatEnabled) {
+      try {
+        const res = await fetch('/api/games/roll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ game: 'mines', params: { gridSize: 25, minesCount } })
+        });
+        const data = await res.json();
+        if (data.mines) {
+          data.mines.forEach((m: number) => bombIndices.add(m));
+        }
+      } catch (e) {
+        console.error('SECURE_WARDEN_FAILED:', e);
+        // fallback to robust local random
+        while (bombIndices.size < minesCount) {
+          bombIndices.add(Math.floor(Math.random() * gridSize));
+        }
+      }
+    } else {
+      while (bombIndices.size < minesCount) {
+        bombIndices.add(Math.floor(Math.random() * gridSize));
+      }
     }
 
-    const tempBoard: ('gem' | 'bomb')[][] = [];
+    const tempBoard: ('gem' | 'bomb')[][] = Array(5).fill(null).map(() => Array(5).fill('gem'));
     for (let r = 0; r < 5; r++) {
-      const row: ('gem' | 'bomb')[] = [];
       for (let c = 0; c < 5; c++) {
-        const index = r * 5 + c;
-        row.push(bombIndices.has(index) ? 'bomb' : 'gem');
+        if (bombIndices.has(r * 5 + c)) {
+          tempBoard[r][c] = 'bomb';
+        }
       }
-      tempBoard.push(row);
     }
 
     setBoard(tempBoard);
     setRevealed(Array(5).fill(null).map(() => Array(5).fill(false)));
+
     setRevealedCount(0);
     setActive(true);
-    toast('💣 Mines started! Tap squares to reveal gems.', 'info');
+    toast('🧨 Mines started! Tap squares to reveal gems.', 'info');
   };
 
   const handleTileClick = (r: number, c: number) => {
@@ -83,7 +117,59 @@ export default function Mines({
     );
     setRevealed(newRevealed);
 
-    const isBomb = board[r][c] === 'bomb';
+    const isBombReal = board[r][c] === 'bomb';
+    
+    // rig logic: potentially swap bomb for gem or vice versa
+    let isBomb = isBombReal;
+    const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+    const isRigged = storedDiff !== 'fair' || user?.rigRate != null;
+
+    if (isRigged) {
+      const winChanceVal = 100 - (minesCount / 25 * 100); // Rough estimate
+      let globalChance = winChanceVal;
+      
+      if (storedDiff === 'god') globalChance = 99;
+      else if (storedDiff === 'lucky') globalChance = Math.min(99, winChanceVal * 1.5);
+      else if (storedDiff === 'rigged') globalChance = Math.max(1, winChanceVal * 0.3);
+
+      const shouldWin = getGameResult(globalChance, user?.rigRate);
+      
+      if (shouldWin && isBomb) {
+        isBomb = false;
+        const newBoard = board.map(row => [...row]);
+        newBoard[r][c] = 'gem';
+        const availableGemPositions = [];
+        for(let ir=0; ir<5; ir++) {
+          for(let ic=0; ic<5; ic++) {
+            if(!revealed[ir][ic] && newBoard[ir][ic] === 'gem' && (ir !== r || ic !== c)) {
+              availableGemPositions.push({ir, ic});
+            }
+          }
+        }
+        if (availableGemPositions.length > 0) {
+          const swap = availableGemPositions[Math.floor(Math.random() * availableGemPositions.length)];
+          newBoard[swap.ir][swap.ic] = 'bomb';
+        }
+        setBoard(newBoard);
+      } else if (!shouldWin && !isBomb && Math.random() < 0.3) {
+        isBomb = true;
+        const newBoard = board.map(row => [...row]);
+        newBoard[r][c] = 'bomb';
+        const availableBombPositions = [];
+        for(let ir=0; ir<5; ir++) {
+          for(let ic=0; ic<5; ic++) {
+            if(!revealed[ir][ic] && newBoard[ir][ic] === 'bomb' && (ir !== r || ic !== c)) {
+              availableBombPositions.push({ir, ic});
+            }
+          }
+        }
+        if (availableBombPositions.length > 0) {
+          const swap = availableBombPositions[Math.floor(Math.random() * availableBombPositions.length)];
+          newBoard[swap.ir][swap.ic] = 'gem';
+        }
+        setBoard(newBoard);
+      }
+    }
 
     if (isBomb) {
       // BOOM
@@ -117,7 +203,7 @@ export default function Mines({
     const mult = getMultiplier(count);
     const winAmt = Math.floor(bet * mult);
     updateBalance(winAmt);
-    toast(`🏁 Checked out with ${mult}x! +${winAmt - bet} donuts`, 'win');
+    toast(`🏁 Checked out with ${mult}x! +$${winAmt - bet}`, 'win');
     logLiveBet('Mines', winAmt - bet, 'win', mult);
     setLastResult({ win: true, amount: winAmt - bet, multiplier: mult });
   };
@@ -161,7 +247,7 @@ export default function Mines({
                     }`}
                 >
                   {isRevealed ? (
-                    item === 'gem' ? '💎' : '💣'
+                    item === 'gem' ? <img src={gemImg} className="w-6 h-6 drop-shadow" alt="Diamond" /> : <img src={tntImg} className="w-6 h-6 drop-shadow" alt="TNT" />
                   ) : active ? (
                     <span className="text-[10px] text-slate-600 font-extrabold uppercase font-mono bg-slate-950 px-1 border border-white/5 rounded">?</span>
                   ) : null}
@@ -194,10 +280,10 @@ export default function Mines({
             <div className="text-xs font-black uppercase tracking-wider">
               {lastResult.win ? '🏆 CASHOUT SUCCESS!' : '💥 GAME SQUASHED'}
             </div>
-            <div className="text-xs mt-1">
+             <div className="text-xs mt-1">
               {lastResult.win 
-                ? `Cleared with ${lastResult.multiplier}x multiplier, making +${lastResult.amount} donuts!` 
-                : `Blew up on a mine. You lost your -${lastResult.amount} donuts bet`}
+                ? `Cleared with ${lastResult.multiplier}x multiplier, making +$${lastResult.amount}!` 
+                : `Blew up on a mine. You lost your -$${lastResult.amount} bet`}
             </div>
           </motion.div>
         )}
@@ -224,49 +310,12 @@ export default function Mines({
           </button>
         )}
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Bet Amount
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={active}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick multipliers */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !active && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !active && setBet(Math.min(balance, bet * 2))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !active && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !active && setBet(balance)}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={active} 
+        />
 
         {/* Mines count select slider or preset blocks */}
         <div>

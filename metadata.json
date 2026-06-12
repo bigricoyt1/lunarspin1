@@ -1,6 +1,6 @@
 {
   "name": "LunarSpin",
-  "description": "A premium casino with custom game modes including Coinflip, Crash, Mines, Roulette, Plinko, Cases, Case Battles, Dice, Towers, and more!",
+  "description": "Minecraft Server Casino with Case Battles, Loot Cases, and win rewards!",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

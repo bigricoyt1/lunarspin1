@@ -19,35 +19,19 @@ export const REWARD_TIERS = [
   { name: 'VIP', req: 5000000, icon: '👑', color: '#f43f5e', glow: 'rgba(244,63,94,.3)' }
 ];
 
-export const MOCK_BOTS = [
-  { username: 'LoverDonut', emoji: '🍩', color: '#fbbf24', role: 'owner', level: 120, avatar: null },
-  { username: 'CreeperSlyr', emoji: '⚔️', color: '#16a34a', role: 'member', level: 32, avatar: null },
-  { username: 'AxolotlQueen', emoji: '👾', color: '#ec4899', role: 'mod', level: 14, avatar: null },
-  { username: 'EnderKing', emoji: '👾', color: '#a855f7', role: 'dev', level: 85, avatar: null },
-  { username: 'StevenTheDonut', emoji: '💪', color: '#3b82f6', role: 'member', level: 51, avatar: null },
-  { username: 'MineGod', emoji: '👑', color: '#f59e0b', role: 'member', level: 98, avatar: null },
-  { username: 'WitchDonut', emoji: '🧪', color: '#d946ef', role: 'member', level: 25, avatar: null },
-  { username: 'NetherLord', emoji: '🔥', color: '#ef4444', role: 'admin', level: 75, avatar: null },
-  { username: 'GoldenSteve', emoji: '🪙', color: '#eab308', role: 'member', level: 112, avatar: null },
-  { username: 'SpongeLlama', emoji: '🦙', color: '#10b981', role: 'member', level: 44, avatar: null }
-];
-
 export const CHAT_PHRASES = [
-  'Just won 10k donuts on Coinflip! LFG 🍩🍩',
-  'Mines at 10 mines is impossible, had 7 gems and hit a fox',
-  'Who wants to do a 4-player classic battle for Lunar Case?',
-  'Sending 500 donuts to the rain pool, tip to keep it going!',
+  'Just won $10k on Coinflip! LFG 💸💸',
+  'Mines at 10 mines is impossible, had 7 gems and hit a skeleton',
+  'Who wants to do a 4-player classic battle for Rank Case?',
   'Blackjack dealer got 21 three times in a row, rig is real smh',
   'Anyone double down on a 11 in blackjack? Easy win',
-  'Can someone claim rain? Countdown went to zero',
   'LunarSpin feels super smooth. Play options are peak',
   'Plinko high risk 13x was so close, hit the 0.2x instead lol',
   'Just link Minecraft username inside wallet to get started, super quick verification',
-  'Wow, jackpot pot got to 45k, lucky winner',
+  'Wow, jackpot pot got to $45k, lucky winner',
   'Can some moderator unmute me? It was a typo',
-  'Wither Star pulled from Nether Case! Let\'s go 🔥',
-  'Is towers Easy or Hard better? Easy is very stable',
-  'Chicken Road 5 steps daredevil pays insane multipliers'
+  'Wither Star pulled from Netherite Case! Let\'s go 🔥',
+  'Is towers Easy or Hard better? Easy is very stable'
 ];
 
 export const MC_ICONS = {
@@ -60,108 +44,8 @@ export const MC_ICONS = {
   ender: '🔮'
 };
 
-export const CASES: Case[] = [
-  {
-    id: 'donut',
-    name: 'Donut Case',
-    price: 100,
-    color: '#e24177',
-    desc: 'Sweet starter snacks of LunarSpin',
-    items: [
-      { id: 'd1', name: 'Stale Donut', percent: 40, value: 10, rarity: 'Common' },
-      { id: 'd2', name: 'Glazed Donut', percent: 20, value: 30, rarity: 'Common' },
-      { id: 'd3', name: 'Sprinkle Donut', percent: 15, value: 60, rarity: 'Uncommon' },
-      { id: 'd4', name: 'Chocolate Donut', percent: 12, value: 120, rarity: 'Uncommon' },
-      { id: 'd5', name: 'Jelly Donut', percent: 8, value: 350, rarity: 'Rare' },
-      { id: 'd6', name: 'Golden Donut', percent: 4, value: 900, rarity: 'Epic' },
-      { id: 'd7', name: 'Enchanted Donut', percent: 0.9, value: 2500, rarity: 'Legendary' },
-      { id: 'd8', name: 'Cosmic Donut', percent: 0.1, value: 10000, rarity: 'Mythic' }
-    ]
-  },
-  {
-    id: 'gold',
-    name: 'Gold Case',
-    price: 500,
-    color: '#fbbf24',
-    desc: 'Shiny Minecraft block treasures',
-    items: [
-      { id: 'g1', name: 'Gold Coin', percent: 35, value: 100, rarity: 'Common' },
-      { id: 'g2', name: 'Gold Nugget', percent: 25, value: 200, rarity: 'Common' },
-      { id: 'g3', name: 'Gold Ingot', percent: 18, value: 450, rarity: 'Uncommon' },
-      { id: 'g4', name: 'Golden Apple', percent: 12, value: 1000, rarity: 'Rare' },
-      { id: 'g5', name: 'Gold Block', percent: 7, value: 2500, rarity: 'Epic' },
-      { id: 'g6', name: 'Enchanted Golden Apple', percent: 2.5, value: 6500, rarity: 'Legendary' },
-      { id: 'g7', name: 'Midas Touch Gavel', percent: 0.5, value: 30000, rarity: 'Mythic' }
-    ]
-  },
-  {
-    id: 'emerald',
-    name: 'Emerald Case',
-    price: 1500,
-    color: '#10b981',
-    desc: 'Wealthy villagers exchange artifacts',
-    items: [
-      { id: 'e1', name: 'Emerald Dust', percent: 35, value: 300, rarity: 'Common' },
-      { id: 'e2', name: 'Small Emerald', percent: 25, value: 600, rarity: 'Common' },
-      { id: 'e3', name: 'Emerald Shard', percent: 18, value: 1200, rarity: 'Uncommon' },
-      { id: 'e4', name: 'Emerald Block', percent: 12, value: 3200, rarity: 'Rare' },
-      { id: 'e5', name: 'Villager Totem', percent: 7, value: 8000, rarity: 'Epic' },
-      { id: 'e6', name: 'Emerald Crown', percent: 2.5, value: 20000, rarity: 'Legendary' },
-      { id: 'e7', name: 'Druid Scepter', percent: 0.5, value: 95000, rarity: 'Mythic' }
-    ]
-  },
-  {
-    id: 'diamond',
-    name: 'Diamond Case',
-    price: 5000,
-    color: '#60a5fa',
-    desc: 'Luxurious gems & durable relics',
-    items: [
-      { id: 'dm1', name: 'Diamond Shard', percent: 35, value: 1000, rarity: 'Common' },
-      { id: 'dm2', name: 'Raw Diamond', percent: 25, value: 2200, rarity: 'Uncommon' },
-      { id: 'dm3', name: 'Cut Diamond', percent: 18, value: 4500, rarity: 'Uncommon' },
-      { id: 'dm4', name: 'Diamond Block', percent: 12, value: 12000, rarity: 'Rare' },
-      { id: 'dm5', name: 'Diamond Crown', percent: 7, value: 30000, rarity: 'Epic' },
-      { id: 'dm6', name: 'Shining Star Gem', percent: 2.5, value: 75000, rarity: 'Legendary' },
-      { id: 'dm7', name: 'Unbreakable Diamond Anvil', percent: 0.5, value: 350000, rarity: 'Mythic' }
-    ]
-  },
-  {
-    id: 'lunar',
-    name: 'Lunar Case',
-    price: 15000,
-    color: '#a855f7',
-    desc: 'Cosmic alignment of extreme riches',
-    items: [
-      { id: 'l1', name: 'Lunar Dust', percent: 30, value: 3000, rarity: 'Common' },
-      { id: 'l2', name: 'Meteor Chunk', percent: 25, value: 6500, rarity: 'Uncommon' },
-      { id: 'l3', name: 'Moon Crystal', percent: 20, value: 12000, rarity: 'Uncommon' },
-      { id: 'l4', name: 'Lunar Stone', percent: 13, value: 35000, rarity: 'Rare' },
-      { id: 'l5', name: 'Nebula Core', percent: 8, value: 85000, rarity: 'Epic' },
-      { id: 'l6', name: 'Galaxy Heart', percent: 3, value: 240000, rarity: 'Legendary' },
-      { id: 'l7', name: 'Infinite Star Fragment', percent: 1, value: 1000000, rarity: 'Mythic' }
-    ]
-  },
-  {
-    id: 'nether',
-    name: 'Nether Blazing Case',
-    price: 45000,
-    color: '#ef4444',
-    desc: 'Fiery core of hellish SMP artifacts',
-    items: [
-      { id: 'nt1', name: 'Blaze Powder', percent: 30, value: 8000, rarity: 'Common' },
-      { id: 'nt2', name: 'Ghast Tear', percent: 25, value: 18000, rarity: 'Uncommon' },
-      { id: 'nt3', name: 'Wither Skeleton Skull', percent: 18, value: 40000, rarity: 'Rare' },
-      { id: 'nt4', name: 'Netherite Ingot', percent: 15, value: 95000, rarity: 'Rare' },
-      { id: 'nt5', name: 'Dragon Breath Vial', percent: 9, value: 250000, rarity: 'Epic' },
-      { id: 'nt6', name: 'Nether Reactor Core', percent: 2.5, value: 650000, rarity: 'Legendary' },
-      { id: 'nt7', name: 'Active Wither Star', percent: 0.5, value: 3000000, rarity: 'Mythic' }
-    ]
-  }
-];
-
 export function formatMoney(val: number): string {
-  if (val === undefined || val === null || isNaN(val)) return '0';
+  if (val === undefined || val === null || isNaN(val)) return '$0';
   const isNegative = val < 0;
   const absVal = Math.abs(val);
 
@@ -175,9 +59,41 @@ export function formatMoney(val: number): string {
   } else if (absVal >= 1e3) {
     formatted = (absVal / 1e3).toFixed(2).replace(/\.00$/, '').replace(/(\.[0-9])0$/, '$1') + 'K';
   } else {
-    formatted = absVal % 1 === 0 ? absVal.toString() : absVal.toFixed(2).replace(/\.00$/, '').replace(/(\.[0-9])0$/, '$1');
+    // Return formatted string with space commas e.g. 5,000
+    formatted = absVal.toLocaleString();
   }
 
-  return isNegative ? `-${formatted}` : formatted;
+  return isNegative ? `-$${formatted}` : `$${formatted}`;
 }
+
+/**
+ * Parses shorthand currency strings (1k, 25m, 1.5b) into numbers
+ */
+export function parseMoney(input: string): number {
+  if (!input) return 0;
+  // Handle literal numbers first if possible
+  const raw = input.trim().toLowerCase();
+  
+  // Extract multiplier
+  let multi = 1;
+  let numStr = raw.replace(/[$,]/g, ''); // Remove symbols
+  
+  if (numStr.endsWith('k')) {
+    multi = 1000;
+    numStr = numStr.slice(0, -1);
+  } else if (numStr.endsWith('m')) {
+    multi = 1000000;
+    numStr = numStr.slice(0, -1);
+  } else if (numStr.endsWith('b')) {
+    multi = 1000000000;
+    numStr = numStr.slice(0, -1);
+  } else if (numStr.endsWith('t')) {
+    multi = 1000000000000;
+    numStr = numStr.slice(0, -1);
+  }
+
+  const val = parseFloat(numStr);
+  return isNaN(val) ? 0 : Math.floor(val * multi);
+}
+
 

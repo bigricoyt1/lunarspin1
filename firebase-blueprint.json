@@ -1,0 +1,54 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with casino statistics and rig settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "balance": { "type": "number" },
+        "avatar": { "type": "string" },
+        "role": { "type": "string", "enum": ["member", "mod", "dev", "admin", "owner"] },
+        "emoji": { "type": "string" },
+        "rigRate": { "type": "number" },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "wins": { "type": "number" },
+            "losses": { "type": "number" },
+            "totalWagered": { "type": "number" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "balance", "role"]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Redeemable promo code with limits.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "value": { "type": "number" },
+        "maxRedemptions": { "type": "number" },
+        "currentRedemptions": { "type": "number" }
+      },
+      "required": ["code", "value", "maxRedemptions", "currentRedemptions"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents."
+    },
+    "/promos/{promoId}": {
+      "schema": "PromoCode",
+      "description": "Promo codes for rewards."
+    },
+    "/bans/{banId}": {
+      "description": "IP and identity bans."
+    }
+  }
+}

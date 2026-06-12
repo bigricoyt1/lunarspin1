@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { parseBet } from '../utils';
 import { motion } from 'motion/react';
-import { Coins, CheckCircle, Smartphone, User, ArrowUpRight, Gift, Key, Clock, RefreshCw } from 'lucide-react';
-import { Transaction, User as UserType } from '../types';
+import { Coins, CheckCircle, Smartphone, User as UserIcon, ArrowUpRight, Gift, Key, Clock, RefreshCw } from 'lucide-react';
+import { User, Transaction, User as UserType } from '../types';
 import { formatMoney } from '../data';
+import { db, handleFirestoreError, OperationType, doc, runTransaction, serverTimestamp } from '../lib/firebase';
 
 interface WalletModalProps {
   user: UserType | null;
@@ -10,6 +12,8 @@ interface WalletModalProps {
   updateBalance: (amt: number) => void;
   transactions: Transaction[];
   addTransaction: (desc: string, amt: number) => void;
+  onLinkMinecraft: (mcName: string) => void;
+  onRequestTransaction: (type: 'deposit' | 'withdrawal', amount: number, mcName: string) => void;
   toast: (msg: string, type: 'win' | 'lose' | 'info') => void;
   onOpenLogin: () => void;
   onClose: () => void;
@@ -21,6 +25,8 @@ export default function WalletModal({
   updateBalance,
   transactions,
   addTransaction,
+  onLinkMinecraft,
+  onRequestTransaction,
   toast,
   onOpenLogin,
   onClose
@@ -28,22 +34,45 @@ export default function WalletModal({
   const [tab, setTab] = useState<'deposit' | 'withdraw' | 'tip' | 'promo' | 'history'>('deposit');
   
   // Deposit mock steps
-  const [mcName, setMcName] = useState<string>('');
-  const [linkingState, setLinkingState] = useState<'idle' | 'linking' | 'verify' | 'linked'>('idle');
+  const [mcName, setMcName] = useState<string>(user?.minecraftUsername || user?.pendingMinecraftUsername || '');
+  const [linkingState, setLinkingState] = useState<'idle' | 'linking' | 'verify' | 'pending' | 'linked'>(
+    user?.minecraftUsername ? 'linked' : (user?.pendingMinecraftUsername ? 'pending' : 'idle')
+  );
+
+  // Sync state when user prop changes (e.g. from Admin approval)
+  React.useEffect(() => {
+    if (user?.minecraftUsername) {
+      setLinkingState('linked');
+      setMcName(user.minecraftUsername);
+    } else if (user?.pendingMinecraftUsername) {
+      setLinkingState('pending');
+      setMcName(user.pendingMinecraftUsername);
+    } else {
+      setLinkingState('idle');
+    }
+  }, [user?.minecraftUsername, user?.pendingMinecraftUsername]);
   const [verifyAmount, setVerifyAmount] = useState<number>(5);
-  const [depositAmt, setDepositAmt] = useState<number>(1000);
+  const [depositAmt, setDepositAmt] = useState<string>('1k');
+  const [depositMethod, setDepositMethod] = useState<'minecraft' | 'stripe'>('stripe');
+  const [isProcessingStripe, setIsProcessingStripe] = useState<boolean>(false);
 
   // Withdrawal outputs
-  const [wdUser, setWdUser] = useState<string>('');
-  const [wdAmt, setWdAmt] = useState<number>(5000);
+  const [wdUser, setWdUser] = useState<string>(user?.minecraftUsername || '');
+  const [wdAmt, setWdAmt] = useState<string>('5k');
 
   // Tip payouts
   const [tipUser, setTipUser] = useState<string>('');
-  const [tipAmt, setTipAmt] = useState<number>(100);
+  const [tipAmt, setTipAmt] = useState<string>('100');
 
   // Promo inputs
   const [promoCode, setPromoCode] = useState<string>('');
-  const [redeemedCodes, setRedeemedCodes] = useState<string[]>([]);
+  const [redeemedCodes, setRedeemedCodes] = useState<string[]>(user?.redeemedCodes || []);
+
+  React.useEffect(() => {
+    if (user?.redeemedCodes) {
+      setRedeemedCodes(user.redeemedCodes);
+    }
+  }, [user?.redeemedCodes]);
 
   const handleLinkMinecraft = () => {
     if (!user) { onOpenLogin(); return; }
@@ -60,49 +89,88 @@ export default function WalletModal({
   };
 
   const handleVerifyPayment = () => {
-    setLinkingState('linked');
-    toast(`✅ Minecraft username "${mcName}" linked successfully!`, 'win');
+    setLinkingState('pending');
+    onLinkMinecraft(mcName);
+    toast(`⏳ Request to link "${mcName}" sent! Waiting for admin approval.`, 'info');
   };
 
   const handleCreateDeposit = () => {
-    if (depositAmt < 100) {
-      toast('Minimum deposit amount is 100 donuts', 'info');
+    if (!user) { onOpenLogin(); return; }
+    const numericAmt = parseBet(depositAmt);
+    if (numericAmt < 100) {
+      toast('Minimum deposit amount is $100', 'info');
       return;
     }
-    toast(`✓ deposit request of ${depositAmt} donuts submitted for verification! Checks pending.`, 'win');
-    // Simulate deposit payout
-    setTimeout(() => {
-      updateBalance(depositAmt);
-      addTransaction(`Deposit Credit (${mcName})`, depositAmt);
-      toast(`✅ Deposit of ${depositAmt} donuts completed successfully!`, 'win');
-    }, 8000);
+    if (user.pendingRequest) {
+      toast('You already have a pending request! Please wait for approval.', 'info');
+      return;
+    }
+    
+    onRequestTransaction('deposit', numericAmt, mcName);
+    toast(`⏳ Deposit request of ${formatMoney(numericAmt)} submitted! Waiting for admin.`, 'info');
+  };
+
+  const handleStripeDeposit = async () => {
+    if (!user) { onOpenLogin(); return; }
+    const numericAmt = parseBet(depositAmt);
+    if (numericAmt < 5) {
+      toast('Minimum deposit amount is $5.00', 'info');
+      return;
+    }
+
+    setIsProcessingStripe(true);
+    try {
+      const response = await fetch('/api/payments/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: numericAmt,
+          userId: user.id,
+          username: user.username
+        })
+      });
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || 'Failed to create checkout session');
+      }
+    } catch (e: any) {
+      toast(e.message || 'Error initiating payment', 'lose');
+    } finally {
+      setIsProcessingStripe(false);
+    }
   };
 
   const handleWithdrawalRequest = () => {
     if (!user) { onOpenLogin(); return; }
-    if (!wdUser.trim() || wdAmt < 5000) {
-      toast('Minimum withdrawal amount is 5,000 donuts', 'info');
+    const numericAmt = parseBet(wdAmt);
+    if (!wdUser.trim() || numericAmt < 5000) {
+      toast('Minimum withdrawal amount is $5,000', 'info');
       return;
     }
-    if (wdAmt > balance) {
-      toast('Insufficient balance for withdrawal!', 'lose');
+    if (numericAmt > balance) {
+      toast('❌ You got no money left!', 'info');
+      return;
+    }
+    if (user.pendingRequest) {
+      toast('You already have a pending request! Please wait for approval.', 'info');
       return;
     }
 
-    updateBalance(-wdAmt);
-    addTransaction(`Withdrawal (${wdUser})`, -wdAmt);
-    toast(`✅ Requested withdrawal of ${wdAmt} donuts! Status: Processing`, 'win');
-    setWdAmt(5000);
+    onRequestTransaction('withdrawal', numericAmt, wdUser);
+    toast(`⏳ Withdrawal request of ${formatMoney(numericAmt)} submitted! Status: Pending Approval`, 'info');
   };
 
   const handleSendTip = () => {
     if (!user) { onOpenLogin(); return; }
-    if (!tipUser.trim() || tipAmt <= 0) {
+    const numericAmt = parseBet(tipAmt);
+    if (!tipUser.trim() || numericAmt <= 0) {
       toast('Invalid username or tip amount!', 'info');
       return;
     }
-    if (tipAmt > balance) {
-      toast('Not enough donuts!', 'lose');
+    if (numericAmt > balance) {
+      toast('❌ You got no money left!', 'info');
       return;
     }
     if (tipUser.toLowerCase() === user.username.toLowerCase()) {
@@ -110,39 +178,72 @@ export default function WalletModal({
       return;
     }
 
-    updateBalance(-tipAmt);
-    addTransaction(`Tip to ${tipUser}`, -tipAmt);
-    toast(`🎁 Sent a tip of ${tipAmt} donuts to ${tipUser}!`, 'win');
-    setTipAmt(100);
+    updateBalance(-numericAmt);
+    addTransaction(`Tip to ${tipUser}`, -numericAmt);
+    toast(`🎁 Sent a tip of $${numericAmt} to ${tipUser}!`, 'win');
+    setTipAmt('100');
     setTipUser('');
   };
 
-  const handleRedeemPromo = () => {
+  const handleRedeemPromo = async () => {
     if (!user) { onOpenLogin(); return; }
-    const code = promoCode.trim().toUpperCase();
-    if (!code) return;
+    const codeInput = promoCode.trim().toUpperCase();
+    if (!codeInput) return;
 
-    if (redeemedCodes.includes(code)) {
+    if (redeemedCodes.includes(codeInput)) {
       toast('You have already redeemed this code!', 'info');
       return;
     }
 
-    const promoMap: Record<string, number> = {
-      'WELCOME250': 250,
-      'DONUT100': 100,
-      'LUNAR500': 500,
-      'VIP1000': 1000
-    };
+    try {
+      const promoRef = doc(db, 'promos', codeInput);
+      const userRef = doc(db, 'users', user.id);
 
-    const payout = promoMap[code];
-    if (payout) {
-      updateBalance(payout);
-      setRedeemedCodes(prev => [...prev, code]);
-      addTransaction(`Promo Code: ${code}`, payout);
-      toast(`🎟️ Code redeemed! +${payout} donuts added to your balance!`, 'win');
-      setPromoCode('');
-    } else {
-      toast('Invalid promo code!', 'lose');
+      await runTransaction(db, async (transaction) => {
+        const promoDoc = await transaction.get(promoRef);
+        if (!promoDoc.exists()) {
+          throw new Error('Invalid promo code!');
+        }
+
+        const promoData = promoDoc.data();
+        if (promoData.currentRedemptions >= promoData.maxRedemptions) {
+          throw new Error('This code has reached its maximum uses!');
+        }
+
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) {
+          throw new Error('User not found!');
+        }
+
+        const userData = userDoc.data();
+        const userCodes = userData.redeemedCodes || [];
+        if (userCodes.includes(codeInput)) {
+          throw new Error('You have already redeemed this code!');
+        }
+
+        const payout = promoData.value;
+        const nextBalance = (userData.balance || 0) + payout;
+
+        // Update promo count
+        transaction.update(promoRef, {
+          currentRedemptions: promoData.currentRedemptions + 1
+        });
+
+        // Update user balance and redeemed codes
+        transaction.update(userRef, {
+          redeemedCodes: [...userCodes, codeInput],
+          updatedAt: serverTimestamp()
+        });
+
+        // Success local updates after transaction
+        updateBalance(payout);
+        setRedeemedCodes(prev => [...prev, codeInput]);
+        addTransaction(`Promo Code: ${codeInput}`, payout);
+        toast(`🎟️ Code redeemed! +${payout.toLocaleString()} Money added to your balance!`, 'info');
+        setPromoCode('');
+      });
+    } catch (err: any) {
+      toast(err.message || 'Error redeeming code', 'info');
     }
   };
 
@@ -158,11 +259,11 @@ export default function WalletModal({
         </button>
 
         <div>
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest block">Wallet Manager</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest block font-sans">Wallet Manager</span>
           <div className="flex items-baseline gap-1 mt-2 justify-center py-4 bg-slate-950/40 rounded-2xl border border-white/5">
-            <span className="text-xl">🍩</span>
-            <span className="text-3xl font-black text-white">{Math.floor(balance).toLocaleString()}</span>
-            <span className="text-[10px] font-black text-purple-400 uppercase tracking-widest ml-1">Donuts</span>
+            <span className="text-xl">💵</span>
+            <span className="text-3xl font-black text-white">{formatMoney(balance)}</span>
+            <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest ml-1 font-mono">CASH</span>
           </div>
         </div>
 
@@ -192,83 +293,174 @@ export default function WalletModal({
           {/* DEPOSIT */}
           {tab === 'deposit' && (
             <div className="flex flex-col gap-3">
-              {linkingState === 'idle' && (
+              {/* Method Selector */}
+              <div className="flex bg-slate-950 p-1 rounded-xl border border-white/5 mb-2">
+                <button 
+                  onClick={() => setDepositMethod('stripe')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${depositMethod === 'stripe' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  Apple/Google/Card
+                </button>
+                <button 
+                  onClick={() => setDepositMethod('minecraft')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${depositMethod === 'minecraft' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  Minecraft In-Game
+                </button>
+              </div>
+
+              {depositMethod === 'minecraft' ? (
                 <>
-                  <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-xs text-slate-400 leading-relaxed">
-                    ⚙️ <strong>Minecraft Linking Required:</strong> Please enter your Minecraft account username to verify deposit holdings.
+                  {linkingState === 'idle' && (
+                    <>
+                      <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-xs text-slate-400 leading-relaxed">
+                        ⚙️ <strong>Minecraft Linking Required:</strong> Please enter your Minecraft account username to verify deposit holdings.
+                      </div>
+                      <div className="flex flex-col gap-1 text-left">
+                        <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Minecraft IGN</span>
+                        <input
+                          type="text"
+                          placeholder="e.g. Steve_Minecraft"
+                          value={mcName}
+                          onChange={(e) => setMcName(e.target.value)}
+                          className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
+                        />
+                      </div>
+                      <button
+                        onClick={handleLinkMinecraft}
+                        className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl mt-2"
+                      >
+                        Link Minecraft
+                      </button>
+                    </>
+                  )}
+
+                  {linkingState === 'linking' && (
+                    <div className="text-center py-10 flex flex-col items-center gap-3">
+                      <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
+                      <span className="text-xs text-slate-400">Verifying on LunarSpin verification node...</span>
+                    </div>
+                  )}
+
+                  {linkingState === 'verify' && (
+                    <div className="flex flex-col gap-3 text-center">
+                      <div className="text-xs text-rose-400 font-bold bg-rose-500/10 border border-rose-500/25 p-3 rounded-lg leading-relaxed">
+                        ⚠️ Owner verification payment pending!
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed text-left">
+                        Please join the Minecraft server and make the following transaction to complete link:
+                      </p>
+                      <div className="bg-slate-950 p-4 border border-white/5 rounded-xl text-md font-mono text-purple-400 font-extrabold uppercase">
+                        /pay [DEPOSIT_BOT_IGN] {verifyAmount}
+                      </div>
+                      <button
+                        onClick={handleVerifyPayment}
+                        className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl mt-2"
+                      >
+                        Verify Complete
+                      </button>
+                    </div>
+                  )}
+
+                  {linkingState === 'pending' && (
+                    <div className="text-center py-10 flex flex-col items-center gap-3">
+                      <div className="w-12 h-12 bg-amber-500/10 rounded-full flex items-center justify-center animate-pulse">
+                        <Clock className="w-6 h-6 text-amber-500" />
+                      </div>
+                      <span className="text-xs font-black text-amber-500 uppercase tracking-widest">Waiting for Admin Approval</span>
+                      <p className="text-[10px] text-slate-500 max-w-[200px]">
+                        Your request to link <strong>{mcName}</strong> has been sent. This usually takes 5-30 minutes.
+                      </p>
+                    </div>
+                  )}
+
+                  {linkingState === 'linked' && (
+                    <div className="flex flex-col gap-4 text-center">
+                      <div className="py-2 px-4 bg-emerald-500/15 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2 text-emerald-400 text-[10px] font-black uppercase tracking-widest">
+                        <CheckCircle className="w-4 h-4 text-emerald-400" /> Admin Confirmed • Link Active
+                      </div>
+                      <div className="text-xs text-slate-300 font-bold">
+                        Connected Character: <span className="text-white bg-slate-800 px-2 py-0.5 rounded ml-1">{mcName}</span>
+                      </div>
+
+                      <div className="flex flex-col gap-1 text-left">
+                        <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Deposit Count (USD)</span>
+                        {user?.pendingRequest ? (
+                          <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-4 text-center">
+                            <span className="text-[10px] font-black text-amber-500 uppercase flex items-center justify-center gap-2">
+                               <Clock className="w-3 h-3" /> Transaction Pending Approval
+                            </span>
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={depositAmt}
+                            onChange={(e) => setDepositAmt(e.target.value)}
+                            className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
+                          />
+                        )}
+                      </div>
+
+                      <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-[10px] text-slate-500 text-left leading-relaxed">
+                        💡 <strong>Deposit Process:</strong> Once submitted, the admin will verify your payment in-game.
+                      </div>
+
+                      {!user?.pendingRequest && (
+                        <button
+                          onClick={handleCreateDeposit}
+                          className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl"
+                        >
+                          Create Deposit
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col gap-4 text-center">
+                  <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-xs text-slate-400 leading-relaxed text-left">
+                    💳 <strong>Digital Payments:</strong> Instantly credit your balance using Apple Pay, Google Pay, or any major Credit Card. Payments are securely processed via Stripe.
                   </div>
+
                   <div className="flex flex-col gap-1 text-left">
-                    <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Minecraft IGN</span>
+                    <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Deposit Amount (USD)</span>
                     <input
                       type="text"
-                      placeholder="e.g. Steve_Minecraft"
-                      value={mcName}
-                      onChange={(e) => setMcName(e.target.value)}
-                      className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
-                    />
-                  </div>
-                  <button
-                    onClick={handleLinkMinecraft}
-                    className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl mt-2"
-                  >
-                    Link Minecraft
-                  </button>
-                </>
-              )}
-
-              {linkingState === 'linking' && (
-                <div className="text-center py-10 flex flex-col items-center gap-3">
-                  <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
-                  <span className="text-xs text-slate-400">Verifying on LunarSpin verification node...</span>
-                </div>
-              )}
-
-              {linkingState === 'verify' && (
-                <div className="flex flex-col gap-3 text-center">
-                  <div className="text-xs text-rose-400 font-bold bg-rose-500/10 border border-rose-500/25 p-3 rounded-lg leading-relaxed">
-                    ⚠️ Owner verification payment pending!
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed text-left">
-                    Please join the Minecraft server and make the following transaction to complete link:
-                  </p>
-                  <div className="bg-slate-950 p-4 border border-white/5 rounded-xl text-md font-mono text-purple-400 font-extrabold uppercase">
-                    /pay lolznumbertree {verifyAmount}
-                  </div>
-                  <button
-                    onClick={handleVerifyPayment}
-                    className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl mt-2"
-                  >
-                    Verify Complete
-                  </button>
-                </div>
-              )}
-
-              {linkingState === 'linked' && (
-                <div className="flex flex-col gap-4 text-center">
-                  <div className="py-2 px-4 bg-emerald-500/15 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2 text-emerald-400 text-xs font-bold">
-                    <CheckCircle className="w-4 h-4 text-emerald-400" /> Minecraft username linked: {mcName}
-                  </div>
-
-                  <div className="flex flex-col gap-1 text-left">
-                    <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Deposit Count (donuts)</span>
-                    <input
-                      type="number"
                       value={depositAmt}
-                      onChange={(e) => setDepositAmt(Math.max(100, Math.floor(parseFloat(e.target.value)) || 100))}
+                      onChange={(e) => setDepositAmt(e.target.value)}
                       className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
                     />
                   </div>
 
-                  <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-[10px] text-slate-500 text-left leading-relaxed">
-                    💡 <strong>How to complete:</strong> After submitting, pay standard bot <code>lolznumbertree</code> in-game to reflect coins within 5 mins.
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 flex flex-col items-center gap-2">
+                      <Smartphone className="w-5 h-5 text-slate-400" />
+                      <span className="text-[8px] font-black text-slate-500 uppercase">Apple Pay</span>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 flex flex-col items-center gap-2">
+                      <Smartphone className="w-5 h-5 text-slate-400" />
+                      <span className="text-[8px] font-black text-slate-500 uppercase">Google Pay</span>
+                    </div>
                   </div>
 
                   <button
-                    onClick={handleCreateDeposit}
-                    className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl"
+                    onClick={handleStripeDeposit}
+                    disabled={isProcessingStripe}
+                    className="w-full py-4 bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 hover:opacity-90 text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-xl shadow-purple-500/20 disabled:opacity-50 transition-all flex items-center justify-center gap-3"
                   >
-                    Create Deposit
+                    {isProcessingStripe ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        SECURE REDIRECTING...
+                      </>
+                    ) : (
+                      <>
+                        <Coins className="w-4 h-4" />
+                        DEPOSIT NOW
+                      </>
+                    )}
                   </button>
+                  <p className="text-[8px] text-slate-600 font-mono uppercase tracking-tighter">Secure 256-bit SSL encrypted transaction</p>
                 </div>
               )}
             </div>
@@ -277,37 +469,49 @@ export default function WalletModal({
           {/* WITHDRAW */}
           {tab === 'withdraw' && (
             <div className="flex flex-col gap-3">
-              <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-xs text-slate-400 leading-relaxed">
-                💸 Submit a requests log to payout donuts directly to your inside Minecraft character. Minimum withdrawal sum: 5,000 donuts.
+              <div className="p-3 bg-slate-950/40 border border-white/5 rounded-xl text-xs text-slate-400 leading-relaxed text-left">
+                💸 Submit a requests log to payout cash directly to your inside Minecraft character. Minimum withdrawal sum: $5,000.
               </div>
 
-              <div className="flex flex-col gap-1 text-left">
-                <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Receiving IGN Character</span>
-                <input
-                  type="text"
-                  placeholder="e.g. Steve_Minecraft"
-                  value={wdUser}
-                  onChange={(e) => setWdUser(e.target.value)}
-                  className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
-                />
-              </div>
+              {user?.pendingRequest ? (
+                <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-8 text-center flex flex-col items-center gap-3">
+                   <div className="w-10 h-10 bg-amber-500/10 rounded-full flex items-center justify-center animate-pulse">
+                      <Clock className="w-5 h-5 text-amber-500" />
+                   </div>
+                   <span className="text-xs font-black text-amber-500 uppercase tracking-tighter">Transaction Pending Approval</span>
+                   <p className="text-[10px] text-slate-500">You already have an active request being reviewed by the admin team.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-1 text-left">
+                    <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Receiving IGN Character</span>
+                    <input
+                      type="text"
+                      placeholder="e.g. Steve_Minecraft"
+                      value={wdUser}
+                      onChange={(e) => setWdUser(e.target.value)}
+                      className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
+                    />
+                  </div>
 
-              <div className="flex flex-col gap-1 text-left">
-                <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Amount (Minimum 5,000)</span>
-                <input
-                  type="number"
-                  value={wdAmt}
-                  onChange={(e) => setWdAmt(Math.max(10, Math.floor(parseFloat(e.target.value)) || 5000))}
-                  className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
-                />
-              </div>
+                  <div className="flex flex-col gap-1 text-left">
+                    <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Amount (Minimum $5,000)</span>
+                    <input
+                      type="text"
+                      value={wdAmt}
+                      onChange={(e) => setWdAmt(e.target.value)}
+                      className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
+                    />
+                  </div>
 
-              <button
-                onClick={handleWithdrawalRequest}
-                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl mt-2"
-              >
-                Withdraw donuts
-              </button>
+                  <button
+                    onClick={handleWithdrawalRequest}
+                    className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl mt-2"
+                  >
+                    Withdraw balance
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -330,11 +534,11 @@ export default function WalletModal({
               </div>
 
               <div className="flex flex-col gap-1 text-left">
-                <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Donuts tip size</span>
+                <span className="text-[9px] font-black text-slate-500 tracking-wider uppercase mb-1">Cash tip size</span>
                 <input
-                  type="number"
+                  type="text"
                   value={tipAmt}
-                  onChange={(e) => setTipAmt(Math.max(1, Math.floor(parseFloat(e.target.value)) || 100))}
+                  onChange={(e) => setTipAmt(e.target.value)}
                   className="bg-slate-950 border border-white/10 rounded-xl p-3 text-white text-xs font-bold outline-none leading-none"
                 />
               </div>
@@ -374,13 +578,11 @@ export default function WalletModal({
                 </div>
               </div>
 
-              <div className="mt-2 text-[10px] text-slate-500">
-                <span className="font-extrabold text-slate-400">Available Welcome Codes:</span>
-                <ul className="list-disc pl-4 mt-1 flex flex-col gap-1">
-                  <li><code>WELCOME250</code> (+250 Donuts)</li>
-                  <li><code>DONUT100</code> (+100 Donuts)</li>
-                  <li><code>LUNAR500</code> (+500 Donuts)</li>
-                </ul>
+              <div className="mt-2 text-[10px] text-slate-500 font-sans">
+                <span className="font-extrabold text-slate-400">Where to find codes?</span>
+                <p className="mt-1 leading-relaxed opacity-60">
+                  Stay active in our lobby chat and follow our official social community feeds for random limited-time prize pool codes!
+                </p>
               </div>
             </div>
           )}
@@ -399,7 +601,7 @@ export default function WalletModal({
                       </span>
                     </div>
                     <span className={`font-black ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isPos ? '+' : ''}{formatMoney(tx.amt)} 🍩
+                      {isPos ? '+' : ''}{formatMoney(tx.amt)}
                     </span>
                   </div>
                 );

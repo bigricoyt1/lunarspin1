@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Coins } from 'lucide-react';
+import { getGameResult } from '../../utils';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
+const diamondImg = 'https://minecraft.wiki/images/Diamond_JE3_BE3.png';
 
 interface PlinkoProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
   logLiveBet: (game: string, amount: number, result: 'win' | 'loss', mult: number) => void;
   toast: (msg: string, type: 'win' | 'lose' | 'info') => void;
   playSound: (win: boolean) => void;
+  antiCheatEnabled?: boolean;
 }
 
 const PLINKO_MULTIPLIERS = {
@@ -31,12 +36,14 @@ interface Ball {
 }
 
 export default function Plinko({
+  user,
   balance,
   updateBalance,
   addXP,
   logLiveBet,
   toast,
-  playSound
+  playSound,
+  antiCheatEnabled
 }: PlinkoProps) {
   const [bet, setBet] = useState<number>(100);
   const [risk, setRisk] = useState<'low' | 'medium' | 'high'>('low');
@@ -46,6 +53,15 @@ export default function Plinko({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationIdRef = useRef<number | null>(null);
   const ballsRef = useRef<Ball[]>([]);
+  const diamondImageRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = diamondImg;
+    img.onload = () => {
+      diamondImageRef.current = img;
+    };
+  }, []);
 
   const rows = 8; // Number of peg rows
   
@@ -69,8 +85,12 @@ export default function Plinko({
   };
 
   const handleDrop = () => {
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -78,13 +98,33 @@ export default function Plinko({
     updateBalance(-bet);
     addXP(Math.max(1, Math.floor(bet / 10)));
 
-    // Plinko path selection: Randomly pick ending bucket index based on binomial dispersion
     const mults = PLINKO_MULTIPLIERS[risk];
+    
+    // Rig logic
+    const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+    const isRiggedWin = getGameResult(50, user?.rigRate);
+
     let col = 0;
-    for (let i = 0; i < mults.length - 1; i++) {
-      if (Math.random() < 0.5) col++;
+    
+    // Standard logic
+    const standardRoll = () => {
+      let c = 0;
+      for (let i = 0; i < mults.length - 1; i++) {
+        if (Math.random() < 0.5) c++;
+      }
+      return Math.max(0, Math.min(mults.length - 1, c));
+    };
+
+    col = standardRoll();
+    
+    // Apply rig logic if set
+    if (storedDiff === 'god' || (user?.rigRate !== null && user?.rigRate !== undefined && user.rigRate > 80)) {
+      // Force extreme ends
+      col = Math.random() < 0.5 ? 0 : mults.length - 1;
+    } else if (storedDiff === 'rigged' || (user?.rigRate !== null && user?.rigRate !== undefined && user.rigRate < 20)) {
+      // Force center
+      col = Math.floor(mults.length / 2);
     }
-    col = Math.max(0, Math.min(mults.length - 1, col));
 
     const canvas = canvasRef.current;
     if (canvas) {
@@ -215,17 +255,17 @@ export default function Plinko({
         }
 
         // Draw the ball dropping
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = 'rgba(168, 85, 247, 0.5)';
-        ctx.fillStyle = '#c084fc';
-        ctx.beginPath();
-        ctx.arc(ball.x, ball.y, 6.5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
+        if (diamondImageRef.current) {
+           ctx.drawImage(diamondImageRef.current, ball.x - 8, ball.y - 8, 16, 16);
+        } else {
+           ctx.shadowBlur = 10;
+           ctx.shadowColor = 'rgba(168, 85, 247, 0.5)';
+           ctx.fillStyle = '#c084fc';
+           ctx.beginPath();
+           ctx.arc(ball.x, ball.y, 6.5, 0, Math.PI * 2);
+           ctx.fill();
+           ctx.shadowBlur = 0;
+        }
 
         // Check if landed in bottom multiplier buckets
         if (ball.y >= bucketY + 5) {
@@ -241,9 +281,9 @@ export default function Plinko({
           playSound(win);
           
           if (win) {
-            toast(`🏆 Plinko hit ${multiplierResult}x! +${rewardAmount - bet} donuts`, 'win');
+            toast(`💎 Plinko hit ${multiplierResult}x! +${rewardAmount - bet} money`, 'win');
           } else {
-            toast(`💸 Plinko hit only ${multiplierResult}x: -${bet - rewardAmount} donuts`, 'lose');
+            toast(`🧨 Plinko hit only ${multiplierResult}x: -${bet - rewardAmount} money`, 'lose');
           }
 
           logLiveBet('Plinko', rewardAmount - bet, win ? 'win' : 'loss', multiplierResult);
@@ -272,7 +312,7 @@ export default function Plinko({
       {/* Canvas Arena */}
       <div className="flex-1 flex flex-col p-6 bg-slate-950/40 justify-center">
         <div className="text-xs font-semibold text-slate-500 tracking-wider h-14 uppercase">
-          TRIANGULAR PLINKO Drop
+          TRIANGULAR PLINKO
         </div>
 
         {/* Bouncy Board */}
@@ -293,48 +333,12 @@ export default function Plinko({
 
       {/* Sidebar Control Panel */}
       <div className="w-full md:w-64 bg-slate-950 p-6 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/5 overflow-y-auto">
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Wager sum
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={dropping}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !dropping && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !dropping && setBet(Math.min(balance, bet * 2))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !dropping && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !dropping && setBet(balance)}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={dropping} 
+        />
 
         {/* Risk bucket selector configuration list */}
         <div>

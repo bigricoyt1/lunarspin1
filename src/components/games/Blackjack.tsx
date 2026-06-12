@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import { getGameResult } from '../../utils';
 import { motion } from 'motion/react';
-import { Coins } from 'lucide-react';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
 
 interface BlackjackProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
@@ -17,7 +20,22 @@ interface Card {
   val: number;
 }
 
-const SUITS = ['♠', '♥', '♦', '♣'];
+const SUITS = ['⚔️', '🍎', '💎', '🍀'];
+
+const emeraldImg = 'https://minecraft.wiki/images/Emerald_JE3_BE3.png';
+const diamondImg = 'https://minecraft.wiki/images/Diamond_JE3_BE3.png';
+const godAppleImg = 'https://minecraft.wiki/images/Enchanted_Golden_Apple_JE2_BE2.png';
+const diamondSwordImg = 'https://minecraft.wiki/images/Diamond_Sword_JE3_BE3.png';
+
+const renderSuitIcon = (suit: string) => {
+  switch (suit) {
+    case '⚔️': return <img src={diamondSwordImg} className="w-5 h-5 object-contain" alt="Spades" />;
+    case '🍎': return <img src={godAppleImg} className="w-5 h-5 object-contain" alt="Hearts" />;
+    case '💎': return <img src={diamondImg} className="w-5 h-5 object-contain" alt="Diamonds" />;
+    case '🍀': return <img src={emeraldImg} className="w-5 h-5 object-contain" alt="Clubs" />;
+    default: return <span>{suit}</span>;
+  }
+};
 const RANKS = [
   { name: '2', val: 2 }, { name: '3', val: 3 }, { name: '4', val: 4 }, { name: '5', val: 5 }, { name: '6', val: 6 },
   { name: '7', val: 7 }, { name: '8', val: 8 }, { name: '9', val: 9 }, { name: '10', val: 10 },
@@ -25,6 +43,7 @@ const RANKS = [
 ];
 
 export default function Blackjack({
+  user,
   balance,
   updateBalance,
   addXP,
@@ -71,8 +90,12 @@ export default function Blackjack({
 
   const handleDeal = () => {
     if (active) return;
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -80,7 +103,35 @@ export default function Blackjack({
     updateBalance(-bet);
     addXP(Math.max(1, Math.floor(bet / 10)));
 
+    const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+    const isRigged = storedDiff !== 'fair' || user?.rigRate != null;
+
     const newDeck = createDeck();
+    
+    // Rig implementation: force good cards for player or bad cards for dealer if win
+    if (isRigged) {
+      const shouldWin = getGameResult(45, user?.rigRate);
+      if (shouldWin) {
+        // Find high card (10 or A) for player
+        const highCardIndex = newDeck.findIndex(c => c.val >= 10);
+        if (highCardIndex !== -1) {
+          const top = newDeck[newDeck.length - 1];
+          newDeck[newDeck.length - 1] = newDeck[highCardIndex];
+          newDeck[highCardIndex] = top;
+        }
+      } else if (storedDiff === 'rigged' || (user?.rigRate !== null && user?.rigRate !== undefined && user.rigRate < 20)) {
+        // Give dealer a high card
+        const highCardIndex = newDeck.findIndex(c => c.val >= 10);
+        if (highCardIndex !== -1) {
+          // Dealer cards are typically p1, d1, p2, d2. So d1 or d2.
+          const dealerCardPos = newDeck.length - 2;
+          const temp = newDeck[dealerCardPos];
+          newDeck[dealerCardPos] = newDeck[highCardIndex];
+          newDeck[highCardIndex] = temp;
+        }
+      }
+    }
+
     const p1 = newDeck.pop()!;
     const d1 = newDeck.pop()!;
     const p2 = newDeck.pop()!;
@@ -205,11 +256,11 @@ export default function Blackjack({
       updateBalance(payout);
       const isWin = payout > currentBet;
       playSound(isWin);
-      toast(isWin ? `🏆 ${message} +${payout - currentBet} donuts!` : `🤜 Push: Bet returned`, 'win');
+      toast(isWin ? `🏆 ${message} +${payout - currentBet} money!` : `🤜 Push: Bet returned`, 'win');
       logLiveBet('Blackjack', payout - currentBet, isWin ? 'win' : 'loss', isWin ? (payout / currentBet) : 1);
     } else {
       playSound(false);
-      toast(`💸 Dealer took the cards: -${currentBet} donuts`, 'lose');
+      toast(`💸 Dealer took the cards: -${currentBet} money`, 'lose');
       logLiveBet('Blackjack', currentBet, 'loss', 0);
     }
 
@@ -251,7 +302,7 @@ export default function Blackjack({
                   ) : (
                     <>
                       <span className="text-xs font-bold leading-none align-top">{c.rank}</span>
-                      <span className="text-3xl text-center self-center h-auto">{c.suit}</span>
+                      <div className="flex items-center justify-center flex-1">{renderSuitIcon(c.suit)}</div>
                       <span className="text-xs font-bold leading-none self-end rotate-180">{c.rank}</span>
                     </>
                   )}
@@ -280,7 +331,7 @@ export default function Blackjack({
                   className="w-16 h-24 rounded-lg bg-white shadow-xl flex flex-col justify-between p-2 select-none text-slate-900 border border-slate-200"
                 >
                   <span className="text-xs font-bold leading-none align-top">{c.rank}</span>
-                  <span className="text-3xl text-center self-center h-auto">{c.suit}</span>
+                  <div className="flex items-center justify-center flex-1">{renderSuitIcon(c.suit)}</div>
                   <span className="text-xs font-bold leading-none self-end rotate-180">{c.rank}</span>
                 </div>
               ))}
@@ -342,49 +393,12 @@ export default function Blackjack({
           </button>
         )}
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Wager donut count
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={active}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick wagers multiples */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !active && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !active && setBet(Math.min(balance, bet * 2))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !active && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !active && setBet(balance)}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={active} 
+        />
 
         <div className="bg-slate-900/60 p-4 rounded-xl border border-white/5 flex flex-col gap-2 mt-auto text-[10px] text-slate-500">
           <div className="flex justify-between font-bold">

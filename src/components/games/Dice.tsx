@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
+import { getGameResult, fmtMoney, parseBet } from '../../utils';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
 import { motion } from 'motion/react';
-import { Coins } from 'lucide-react';
+
+import gemImg from '../../assets/images/diamond_gem_1781074170180.png';
 
 interface DiceProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
@@ -12,6 +17,7 @@ interface DiceProps {
 }
 
 export default function Dice({
+  user,
   balance,
   updateBalance,
   addXP,
@@ -26,8 +32,12 @@ export default function Dice({
   const [lastResult, setLastResult] = useState<{ win: boolean; drawnNum: number; target: number; mode: 'under' | 'over' } | null>(null);
 
   const handleRoll = (mode: 'under' | 'over') => {
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -43,24 +53,45 @@ export default function Dice({
 
       if (spins > 10) {
         clearInterval(interval);
-        const finalRoll = Math.floor(Math.random() * 101);
+        
+        // Rig logic
+        const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+        const isRigged = storedDiff !== 'fair' || user?.rigRate != null;
+        const winChanceVal = mode === 'under' ? target : 100 - target;
+        
+        let win = false;
+        let finalRoll = Math.floor(Math.random() * 101); // 0 to 100
+
+        if (isRigged) {
+          let globalChance = winChanceVal;
+          if (storedDiff === 'god') globalChance = 99;
+          else if (storedDiff === 'lucky') globalChance = Math.min(99, winChanceVal * 1.5);
+          else if (storedDiff === 'rigged') globalChance = Math.max(1, winChanceVal * 0.3);
+
+          const forcedWin = getGameResult(globalChance, user?.rigRate);
+          if (forcedWin) {
+            finalRoll = mode === 'under' ? Math.floor(Math.random() * target) : Math.floor(target + 1 + Math.random() * (100 - target));
+          } else {
+            finalRoll = mode === 'under' ? Math.floor(target + Math.random() * (101 - target)) : Math.floor(Math.random() * (target + 1));
+          }
+        }
+
+        win = mode === 'under' ? finalRoll < target : finalRoll > target;
+
         setDrawnRoll(finalRoll);
         setRolling(false);
 
-        // Win criteria
-        const win = mode === 'under' ? finalRoll < target : finalRoll > target;
-        const winChance = mode === 'under' ? target : 100 - target;
-        const multiplier = parseFloat((100 / winChance).toFixed(2));
+        const multiplier = parseFloat((100 / winChanceVal).toFixed(2));
         const reward = win ? Math.floor(bet * multiplier) : 0;
 
         if (win) {
           updateBalance(reward);
           playSound(true);
-          toast(`🏆 Dice hit! Select ${mode.toUpperCase()} ${target}: +${reward - bet} donuts`, 'win');
+          toast(`💎 Dice hit! Select ${mode.toUpperCase()} ${target}: +${fmtMoney(reward - bet)} money`, 'win');
           setLastResult({ win: true, drawnNum: finalRoll, target, mode });
         } else {
           playSound(false);
-          toast(`💸 Dice missed: -${bet} donuts`, 'lose');
+          toast(`🧨 Dice missed: -${fmtMoney(bet)} money`, 'lose');
           setLastResult({ win: false, drawnNum: finalRoll, target, mode });
         }
 
@@ -68,6 +99,7 @@ export default function Dice({
       }
     }, 85);
   };
+
 
   const getChance = (mode: 'under' | 'over') => (mode === 'under' ? target : 100 - target);
   const getMultiplier = (mode: 'under' | 'over') => {
@@ -95,7 +127,11 @@ export default function Dice({
                 : 'bg-slate-900 border-white/10 text-slate-300'
             }`}
           >
-            {drawnRoll !== null ? drawnRoll : '🎲'}
+            {drawnRoll !== null ? (
+              <span className="z-10">{drawnRoll}</span>
+            ) : (
+              <img src={gemImg} className="w-16 h-16 object-contain" alt="Dice" />
+            )}
             <div className="absolute top-2 right-2 text-[10px] opacity-25">0-100</div>
           </div>
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest mt-3">
@@ -115,7 +151,7 @@ export default function Dice({
             min={5}
             max={95}
             value={target}
-            onChange={(e) => setTarget(parseInt(e.target.value))}
+            onChange={(e) => setTarget(parseInt(e.target.value, 10))}
             disabled={rolling}
             className="w-full accent-purple-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
@@ -145,7 +181,8 @@ export default function Dice({
             </div>
             <div className="text-xs mt-1">
               Rolled <span className="font-bold underline">{lastResult.drawnNum}</span> which was{' '}
-              {lastResult.mode === 'under' ? 'under' : 'over'} target {lastResult.target}. You met win targets!
+              {lastResult.drawnNum < lastResult.target ? 'under' : lastResult.drawnNum > lastResult.target ? 'over' : 'exactly'} target {lastResult.target}.{' '}
+              {lastResult.win ? 'You met win targets!' : 'Better luck next time.'}
             </div>
           </motion.div>
         )}
@@ -153,49 +190,12 @@ export default function Dice({
 
       {/* Control panel and bet options sidebar */}
       <div className="w-full md:w-64 bg-slate-950 p-6 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/5 overflow-y-auto">
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Wager roll
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={rolling}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick multipliers limits */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !rolling && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !rolling && setBet(Math.min(balance, bet * 2))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !rolling && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !rolling && setBet(balance)}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={rolling} 
+        />
 
         {/* Action roll triggers */}
         <div className="flex flex-col gap-2 mt-auto">

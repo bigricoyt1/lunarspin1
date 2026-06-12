@@ -1,26 +1,38 @@
 import React, { useState } from 'react';
+import { getGameResult } from '../../utils';
 import { motion, useAnimation } from 'motion/react';
-import { Coins, Eye } from 'lucide-react';
+import { Eye } from 'lucide-react';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
+import { db, collection, addDoc, serverTimestamp } from '../../lib/firebase';
+
+import emeraldImg from '../../assets/images/mine_emerald_1781192001325.jpg';
+import godAppleImg from '../../assets/images/mine_god_apple_1781192135510.jpg';
+import netheriteSwordImg from '../../assets/images/mine_netherite_sword_1781192121880.jpg';
 
 interface RouletteProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
   logLiveBet: (game: string, amount: number, result: 'win' | 'loss', mult: number) => void;
   toast: (msg: string, type: 'win' | 'lose' | 'info') => void;
   playSound: (win: boolean) => void;
+  antiCheatEnabled?: boolean;
 }
 
 const WHEEL_SEQUENCE = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
 const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
 
 export default function Roulette({
+  user,
   balance,
   updateBalance,
   addXP,
   logLiveBet,
   toast,
-  playSound
+  playSound,
+  antiCheatEnabled
 }: RouletteProps) {
   const [bet, setBet] = useState<number>(100);
   const [betType, setBetType] = useState<'red' | 'black' | 'green' | 'even' | 'odd' | null>(null);
@@ -46,8 +58,12 @@ export default function Roulette({
       toast('Select Red, Black, Green, Even, or Odd first!', 'info');
       return;
     }
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -56,43 +72,73 @@ export default function Roulette({
     updateBalance(-bet);
     addXP(Math.max(1, Math.floor(bet / 10)));
 
-    // Choose random landing index (0-36)
-    const landingIndex = Math.floor(Math.random() * 37);
-    const winningNumber = WHEEL_SEQUENCE[landingIndex];
-    const winningColor = getNumberColor(winningNumber);
+    // Rig logic
+    const forcedWin = (Math.random() < 0.50); // ALWAYS 50% win rate as requested in every game
+    
+    let landingIndex = Math.floor(Math.random() * 37);
+    let iterations = 0;
+    
+    while (iterations < 200) {
+      const num = WHEEL_SEQUENCE[landingIndex];
+      const col = getNumberColor(num);
+      const isEvenNum = num !== 0 && num % 2 === 0;
+      const isOddNum = num !== 0 && num % 2 !== 0;
+
+      let currentWin = false;
+      if (betType === 'red' && col === 'red') currentWin = true;
+      else if (betType === 'black' && col === 'black') currentWin = true;
+      else if (betType === 'green' && col === 'green') currentWin = true;
+      else if (betType === 'even' && isEvenNum) currentWin = true;
+      else if (betType === 'odd' && isOddNum) currentWin = true;
+
+      // Match the 50/50 target for standard bets, or the 1/14 target for green (if forcedWin is true for green it's very lucky)
+      if (betType === 'green') {
+        if (col === 'green') break; // Green is still hard to get unless user luck is insane
+      } else {
+        if (currentWin === forcedWin) break;
+      }
+      
+      landingIndex = Math.floor(Math.random() * 37);
+      iterations++;
+    }
+
+    let winningNumber = WHEEL_SEQUENCE[landingIndex];
+    let winningColor = getNumberColor(winningNumber);
+    const num = winningNumber;
+    const isEvenNum = num !== 0 && num % 2 === 0;
+    const isOddNum = num !== 0 && num % 2 !== 0;
+
+    let win = false;
+    if (betType === 'red' && winningColor === 'red') win = true;
+    else if (betType === 'black' && winningColor === 'black') win = true;
+    else if (betType === 'green' && winningColor === 'green') win = true;
+    else if (betType === 'even' && isEvenNum) win = true;
+    else if (betType === 'odd' && isOddNum) win = true;
 
     // Carousel calculations:
-    // We create a repetitive array, let's slide by several loops.
-    // Standard block width is 50px.
     const blockWidth = 52;
     const padding = 6;
     const loopOffset = blockWidth + padding;
     
-    // We want the winner to land exactly in the center of the viewport box (which is 100% parent width).
-    // Let's reset the track first, then animate to targetX.
+    // Reset track first
     await carouselControls.set({ x: 0 });
 
     // Multiply loops to give spinning friction
-    const spinLoops = 3;
+    const spinLoops = 5; // More loops for better feel
     const finalIndex = spinLoops * 37 + landingIndex;
-    const targetX = -(finalIndex * loopOffset - 200); // 200px centers the item in standard wraps
+    
+    // We want the item's CENTER to be at the pointer.
+    // The strip starts at 50% (pointer). To bring item K to the pointer:
+    // x = -(K * loopOffset + blockWidth / 2)
+    const targetX = -(finalIndex * loopOffset + (blockWidth / 2));
 
     await carouselControls.start({
       x: targetX,
-      transition: { duration: 4.5, ease: [0.15, 0.7, 0.25, 1] } // Decelerating easing curve
+      transition: { duration: 5, ease: [0.15, 0.7, 0.25, 1] } 
     });
 
-    const isEvenNum = winningNumber !== 0 && winningNumber % 2 === 0;
-    const isOddNum = winningNumber !== 0 && winningNumber % 2 !== 0;
-
-    let win = false;
     let multiplier = 2;
-
-    if (betType === 'red' && winningColor === 'red') win = true;
-    else if (betType === 'black' && winningColor === 'black') win = true;
-    else if (betType === 'green' && winningColor === 'green') { win = true; multiplier = 14; }
-    else if (betType === 'even' && isEvenNum) win = true;
-    else if (betType === 'odd' && isOddNum) win = true;
+    if (betType === 'green') multiplier = 14;
 
     const payout = win ? bet * multiplier : 0;
     setSpinning(false);
@@ -100,16 +146,17 @@ export default function Roulette({
     if (win) {
       updateBalance(payout);
       playSound(true);
-      toast(`🏆 Roulette WIN! Selected ${betType.toUpperCase()}: +${payout - bet} donuts`, 'win');
+      toast(`🏆 Roulette WIN! Selected ${betType.toUpperCase()}: +${payout - bet} money`, 'win');
       setLastResult({ win: true, drawnNum: winningNumber, color: winningColor, amount: payout - bet });
     } else {
       playSound(false);
-      toast(`💸 Lost roulette bet: -${bet} donuts`, 'lose');
+      toast(`💸 Lost roulette bet: -${bet} money`, 'lose');
       setLastResult({ win: false, drawnNum: winningNumber, color: winningColor, amount: bet });
     }
 
     logLiveBet('Roulette', bet, win ? 'win' : 'loss', win ? multiplier : 0);
     setHistory(prev => [{ num: winningNumber, color: winningColor }, ...prev.slice(0, 7)]);
+
   };
 
   // Build the list of blocks for sliding strip
@@ -201,7 +248,7 @@ export default function Roulette({
               {lastResult.win ? '🏆 ROULETTE PROFIT HIT!' : '💸 WHEEL MISS'}
             </div>
             <div className="text-xs mt-1">
-              Lucky number drew <span className="font-bold underline">{lastResult.drawnNum}</span> ({lastResult.color.toUpperCase()}). {lastResult.win ? `+${lastResult.amount}` : `-${lastResult.amount}`} donuts.
+              Lucky number drew <span className="font-bold underline">{lastResult.drawnNum}</span> ({lastResult.color.toUpperCase()}). {lastResult.win ? `+${lastResult.amount}` : `-${lastResult.amount}`} money.
             </div>
           </motion.div>
         )}
@@ -209,93 +256,59 @@ export default function Roulette({
 
       {/* Control panel and bet options sidebar */}
       <div className="w-full md:w-64 bg-slate-950 p-6 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/5 overflow-y-auto">
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Wager value
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={spinning}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick wagers buttons */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !spinning && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !spinning && setBet(Math.min(balance, bet * 2))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !spinning && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !spinning && setBet(balance)}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={spinning} 
+        />
 
         {/* Wager categories choices */}
         <div>
           <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Roulette Sector Categories
+            Roulette Categories
           </label>
           <div className="flex flex-col gap-2">
             {/* Split Red vs Black */}
             <div className="flex gap-2">
               <button
                 onClick={() => !spinning && setBetType('red')}
-                className={`flex-1 py-3 text-xs font-extrabold border-2 rounded-xl transition-all
+                className={`flex-1 py-3 text-xs font-extrabold border-2 rounded-xl transition-all flex flex-col items-center justify-center gap-1
                   ${betType === 'red' 
                     ? 'border-rose-500 bg-rose-500/10 text-rose-300 font-extrabold' 
                     : 'bg-slate-900 border-white/5 text-slate-400 hover:bg-slate-800'
                   }`}
                 disabled={spinning}
               >
-                🔴 RED (2x)
+                <img src={godAppleImg} className="w-5 h-5 object-contain" alt="Red" />
+                <span>RED (2x)</span>
               </button>
               <button
                 onClick={() => !spinning && setBetType('black')}
-                className={`flex-1 py-3 text-xs font-extrabold border-2 rounded-xl transition-all
+                className={`flex-1 py-3 text-xs font-extrabold border-2 rounded-xl transition-all flex flex-col items-center justify-center gap-1
                   ${betType === 'black' 
                     ? 'border-slate-400 bg-slate-400/5 text-slate-200 font-extrabold' 
                     : 'bg-slate-900 border-white/5 text-slate-400 hover:bg-slate-800'
                   }`}
                 disabled={spinning}
               >
-                ⚫ BLACK (2x)
+                <img src={netheriteSwordImg} className="w-5 h-5 object-contain" alt="Black" />
+                <span>BLACK (2x)</span>
               </button>
             </div>
             
             {/* Green Center sector */}
             <button
               onClick={() => !spinning && setBetType('green')}
-              className={`w-full py-3 text-xs font-extrabold border-2 rounded-xl transition-all
+              className={`w-full py-3 text-xs font-extrabold border-2 rounded-xl transition-all flex flex-col items-center justify-center gap-1
                 ${betType === 'green' 
                   ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300 font-extrabold' 
                   : 'bg-slate-900 border-white/5 text-slate-400 hover:bg-slate-800'
                 }`}
               disabled={spinning}
             >
-              🟢 GREEN ZERO sector (14x)
+              <img src={emeraldImg} className="w-5 h-5 object-contain" alt="Green" />
+              <span>GREEN ZERO sector (14x)</span>
             </button>
 
             {/* Odds vs Evens sectors */}

@@ -1,9 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getGameResult } from '../../utils';
 import { motion, useAnimation } from 'motion/react';
-import { Coins, User, Users } from 'lucide-react';
-import { MOCK_BOTS, formatMoney } from '../../data';
+import { User, Users } from 'lucide-react';
+import { formatMoney } from '../../data';
+import { User as UserType } from '../../types';
+import { db, doc, updateDoc, arrayUnion, getDoc } from '../../lib/firebase';
+import BetControl from './BetControl';
+import diamondImg from '../../assets/images/diamond_gem_1781074170180.png';
+import tntImg from '../../assets/images/tnt_block_1781074158589.png';
+const godAppleImg = 'https://minecraft.wiki/images/Enchanted_Golden_Apple_JE2_BE2.png';
 
 interface JackpotProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
@@ -25,6 +33,7 @@ const JP_COLORS = [
 ];
 
 export default function Jackpot({
+  user,
   balance,
   updateBalance,
   addXP,
@@ -37,6 +46,29 @@ export default function Jackpot({
   const [joined, setJoined] = useState<boolean>(false);
   const [active, setActive] = useState<boolean>(false);
   const [players, setPlayers] = useState<JackpotPlayer[]>([]);
+  
+  // Polling for "jackpot_game"
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'config', 'jackpot_game'));
+        if (snap.exists()) {
+          const data = snap.data();
+          setPlayers(data.players || []);
+          setActive(data.active);
+          setTimeLeft(data.timeLeft);
+          if (data.wheelAngle !== undefined) setWheelAngle(data.wheelAngle);
+          if (data.outcome !== undefined) setOutcome(data.outcome);
+        }
+      } catch (error) {
+        console.error('Jackpot config sync failed:', error);
+      }
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 5000); // Poll every 5s
+    return () => clearInterval(interval);
+  }, []);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [wheelAngle, setWheelAngle] = useState<number>(0);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -149,14 +181,17 @@ export default function Jackpot({
     }, 1000);
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (joined || active) return;
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
-    setOutcome(null);
     setJoined(true);
     updateBalance(-bet);
     addXP(Math.max(1, Math.floor(bet / 10)));
@@ -165,17 +200,15 @@ export default function Jackpot({
     const userPlayer: JackpotPlayer = {
       username,
       amount: bet,
-      color: '#a855f7', // Nice purple
+      color: '#a855f7',
       isUser: true
     };
 
-    // Spawn 0 active bot entries into pool (No bots allowed)
-    const extraPlayersCount = 0;
-    const botEntries: JackpotPlayer[] = [];
-
-    const fullRoster = [userPlayer, ...botEntries];
-    setPlayers(fullRoster);
-    startCountdown();
+    // Add player to Firestore jackpot lobby
+    await updateDoc(doc(db, 'config', 'jackpot_game'), {
+      players: arrayUnion(userPlayer)
+    });
+    
     toast('✓ Joined Jackpot pool! Spin countdown timer active.', 'win');
   };
 
@@ -185,17 +218,37 @@ export default function Jackpot({
     let deceleration = 0.98;
     let angle = 0;
 
-    // Pick winning ticket slice
     const totalPotSize = players.reduce((s, p) => s + p.amount, 0);
-    const winningFactor = Math.random() * totalPotSize;
-    let cumulative = 0;
-    let winnerIndex = 0;
+    
+    // Rig logic
+    const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+    const userIndex = players.findIndex(p => p.isUser);
+    const userChance = userIndex !== -1 ? (players[userIndex].amount / totalPotSize) * 100 : 0;
+    
+    let globalChance = userChance;
+    if (storedDiff === 'god') globalChance = 99;
+    else if (storedDiff === 'lucky') globalChance = Math.min(99, userChance * 2);
+    else if (storedDiff === 'rigged') globalChance = Math.max(1, userChance * 0.2);
 
-    for (let i = 0; i < players.length; i++) {
-      cumulative += players[i].amount;
-      if (winningFactor <= cumulative) {
-        winnerIndex = i;
-        break;
+    const userShouldWin = getGameResult(globalChance, user?.rigRate);
+    
+    let winnerIndex = 0;
+    if (userShouldWin && userIndex !== -1) {
+      winnerIndex = userIndex;
+    } else {
+      const winningFactor = Math.random() * totalPotSize;
+      let cumulative = 0;
+      for (let i = 0; i < players.length; i++) {
+        cumulative += players[i].amount;
+        if (winningFactor <= cumulative) {
+          winnerIndex = i;
+          break;
+        }
+      }
+      
+      // If rig says lose but they won by luck, try to pick another winner if there are others
+      if (!userShouldWin && winnerIndex === userIndex && players.length > 1 && Math.random() < 0.5) {
+         winnerIndex = (userIndex + 1) % players.length;
       }
     }
 
@@ -217,20 +270,15 @@ export default function Jackpot({
         if (winner.isUser) {
           updateBalance(totalPotSize);
           playSound(true);
-          toast(`🏆 JACKPOT WINNER! You took the entire ${totalPotSize} donuts pot!`, 'win');
+          toast(`💎 JACKPOT WINNER! You took the entire ${totalPotSize} money pot!`, 'win');
           logLiveBet('Jackpot', totalPotSize - bet, 'win', parseFloat((totalPotSize / bet).toFixed(2)));
         } else {
           playSound(false);
-          toast(`💸 ${winner.username} won the pot of ${totalPotSize} donuts`, 'lose');
+          toast(`💸 ${winner.username} won the pot of ${totalPotSize} money`, 'lose');
           logLiveBet('Jackpot', bet, 'loss', 0);
         }
       }
     }, 24);
-  };
-
-  const handleBetChange = (val: string) => {
-    const num = Math.floor(parseFloat(val)) || 0;
-    setBet(Math.max(1, Math.min(balance, num)));
   };
 
   return (
@@ -238,7 +286,7 @@ export default function Jackpot({
       {/* Visual Arena */}
       <div className="flex-1 flex flex-col p-6 bg-slate-950/40 relative justify-center items-center">
         <div className="absolute top-4 left-4 text-xs font-semibold text-slate-500 tracking-wider">
-          POT JACKPOT ROOM
+          JACKPOT ROOM
         </div>
 
         {/* Pointer indicator */}
@@ -249,8 +297,9 @@ export default function Jackpot({
 
         {/* Timers countdown alert */}
         {timeLeft !== null && (
-          <div className="py-2 px-6 rounded-xl bg-amber-400/10 border border-amber-400/30 text-amber-400 text-center font-black animate-pulse my-4 text-xs tracking-wider">
-            🚨 ROUND STARTS IN {timeLeft}s...
+          <div className="py-2 px-6 rounded-xl bg-amber-400/10 border border-amber-400/30 text-amber-400 text-center font-black animate-pulse my-4 text-xs tracking-wider flex items-center gap-2">
+            <img src={tntImg} className="w-4 h-4 object-contain" alt="TNT" />
+            ROUND STARTS IN {timeLeft}s...
           </div>
         )}
 
@@ -280,49 +329,12 @@ export default function Jackpot({
           {joined ? 'WAITING FOR SPIN...' : '🎰 JOIN JACKPOT'}
         </button>
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Wager deposit
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => handleBetChange(e.target.value)}
-              disabled={joined || active}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick multipliers limits */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !joined && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !joined && setBet(Math.min(balance, bet * 2))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !joined && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !joined && setBet(balance)}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={joined || active} 
+        />
 
         {/* Roster list of active players in round */}
         {players.length > 0 && (

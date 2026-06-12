@@ -1,23 +1,33 @@
 import React, { useState } from 'react';
+import { getGameResult } from '../../utils';
 import { motion } from 'motion/react';
-import { Volume2, VolumeX, Coins } from 'lucide-react';
+import { Volume2, VolumeX } from 'lucide-react';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
+
+const emeraldImg = 'https://minecraft.wiki/images/Emerald_JE3_BE3.png';
+const diamondImg = 'https://minecraft.wiki/images/Diamond_JE3_BE3.png';
 
 interface CoinflipProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
   logLiveBet: (game: string, amount: number, result: 'win' | 'loss', mult: number) => void;
   toast: (msg: string, type: 'win' | 'lose' | 'info') => void;
   playSound: (win: boolean) => void;
+  antiCheatEnabled?: boolean;
 }
 
 export default function Coinflip({
+  user,
   balance,
   updateBalance,
   addXP,
   logLiveBet,
   toast,
-  playSound
+  playSound,
+  antiCheatEnabled
 }: CoinflipProps) {
   const [bet, setBet] = useState<number>(100);
   const [choice, setChoice] = useState<'heads' | 'tails' | null>(null);
@@ -25,24 +35,38 @@ export default function Coinflip({
   const [coinSide, setCoinSide] = useState<'heads' | 'tails'>('heads');
   const [lastResult, setLastResult] = useState<{ win: boolean; coinSide: 'heads' | 'tails'; amount: number } | null>(null);
 
-  const handleBetChange = (val: string) => {
-    const num = Math.floor(parseFloat(val)) || 0;
-    setBet(Math.max(1, Math.min(balance, num)));
-  };
-
-  const handleFlip = () => {
+  const handleFlip = async () => {
     if (!choice) {
       toast('Select Heads or Tails first!', 'info');
       return;
     }
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
     setFlipping(true);
     setLastResult(null);
     updateBalance(-bet);
+
+    // Fetch secure side if enabled
+    let finalSide: 'heads' | 'tails' | null = null;
+    
+    if ((window as any).antiCheatEnabled) {
+      try {
+        const res = await fetch('/api/games/roll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ game: 'coinflip' })
+        });
+        const data = await res.json();
+        finalSide = data.side;
+      } catch (e) {}
+    }
 
     // Simulate flipping coin
     let counter = 0;
@@ -51,8 +75,22 @@ export default function Coinflip({
       counter++;
       if (counter > 10) {
         clearInterval(interval);
-        const finalSide = Math.random() < 0.5 ? 'heads' : 'tails';
-        const win = finalSide === choice;
+        
+        let win = false;
+        if (!finalSide) {
+          // Rig logic fallback
+          const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+          let globalChance = 50;
+          if (storedDiff === 'god') globalChance = 99;
+          if (storedDiff === 'lucky') globalChance = 75;
+          if (storedDiff === 'rigged') globalChance = 15;
+
+          win = getGameResult(globalChance, user?.rigRate);
+          finalSide = win ? choice : (choice === 'heads' ? 'tails' : 'heads');
+        } else {
+          win = finalSide === choice;
+        }
+
         const reward = win ? bet * 2 : 0;
 
         setCoinSide(finalSide);
@@ -61,11 +99,11 @@ export default function Coinflip({
         if (win) {
           updateBalance(reward);
           playSound(true);
-          toast(`🏆 You WON ${bet} donuts!`, 'win');
+          toast(`🏆 You WON $${bet}!`, 'win');
           setLastResult({ win: true, coinSide: finalSide, amount: bet });
         } else {
           playSound(false);
-          toast(`💸 You LOST ${bet} donuts`, 'lose');
+          toast(`💸 You LOST $${bet}`, 'lose');
           setLastResult({ win: false, coinSide: finalSide, amount: bet });
         }
 
@@ -92,10 +130,14 @@ export default function Coinflip({
                 ? 'bg-gradient-to-br from-amber-400/20 to-yellow-600/5 border-amber-400/60 shadow-amber-400/10' 
                 : 'bg-gradient-to-br from-purple-400/20 to-indigo-600/5 border-purple-400/60 shadow-purple-400/10'
               }`}
-            animate={flipping ? { rotateY: 360 * 3, scale: [1, 1.2, 1] } : {}}
+             animate={flipping ? { rotateY: 360 * 3, scale: [1, 1.2, 1] } : {}}
             transition={{ duration: 1, ease: "easeOut" }}
           >
-            {coinSide === 'heads' ? '☀️' : '🌙'}
+            {coinSide === 'heads' ? (
+              <img src={emeraldImg} className="w-24 h-24 object-contain" alt="Emerald" referrerPolicy="no-referrer" />
+            ) : (
+              <img src={diamondImg} className="w-24 h-24 object-contain" alt="Diamond" referrerPolicy="no-referrer" />
+            )}
             <div className="absolute inset-2 border-2 border-dashed border-white/5 rounded-full" />
           </motion.div>
         </div>
@@ -111,7 +153,7 @@ export default function Coinflip({
               }`}
             disabled={flipping}
           >
-            <span className="text-3xl">☀️</span>
+            <img src={emeraldImg} className="w-12 h-12 object-contain" alt="Emerald" referrerPolicy="no-referrer" />
             <span className="text-xs font-bold mt-2 uppercase tracking-wide">Heads</span>
           </button>
           
@@ -124,7 +166,7 @@ export default function Coinflip({
               }`}
             disabled={flipping}
           >
-            <span className="text-3xl">🌙</span>
+            <img src={diamondImg} className="w-12 h-12 object-contain" alt="Diamond" referrerPolicy="no-referrer" />
             <span className="text-xs font-bold mt-2 uppercase tracking-wide">Tails</span>
           </button>
         </div>
@@ -144,7 +186,7 @@ export default function Coinflip({
               {lastResult.win ? '🏆 YOU WON!' : '💸 YOU LOST'}
             </div>
             <div className="text-xs mt-1">
-              Coin landed on <span className="font-bold">{lastResult.coinSide === 'heads' ? '☀️ Heads' : '🌙 Tails'}</span>. {lastResult.win ? `+${lastResult.amount * 2}` : `-${lastResult.amount}`} donuts.
+              Coin landed on <span className="font-bold">{lastResult.coinSide === 'heads' ? 'Emerald' : 'Diamond'}</span>. {lastResult.win ? `+$${lastResult.amount * 2}` : `-$${lastResult.amount}`}.
             </div>
           </motion.div>
         )}
@@ -152,49 +194,12 @@ export default function Coinflip({
 
       {/* Control Panel Sidebar */}
       <div className="w-full md:w-64 bg-slate-950 p-6 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/5">
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Bet Amount
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => handleBetChange(e.target.value)}
-              disabled={flipping}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick multipliers */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !flipping && setBet(Math.max(1, Math.floor(bet / 2)))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !flipping && setBet(Math.min(balance, bet * 2))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !flipping && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !flipping && setBet(balance)}
-            className="p-2 text-xs font-black bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={flipping} 
+        />
 
         {/* Static multipliers block for premium look */}
         <div className="grid grid-cols-2 gap-2 mt-2">

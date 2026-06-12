@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
+import { getGameResult } from '../../utils';
 import { motion } from 'motion/react';
-import { Coins } from 'lucide-react';
 import { formatMoney } from '../../data';
+import { User as UserType } from '../../types';
+import BetControl from './BetControl';
+
+import tntImg from '../../assets/images/tnt_block_1781074158589.png';
+import gemImg from '../../assets/images/diamond_gem_1781074170180.png';
 
 interface TowersProps {
+  user: UserType | null;
   balance: number;
   updateBalance: (amt: number) => void;
   addXP: (amt: number) => void;
@@ -13,12 +19,13 @@ interface TowersProps {
 }
 
 const T_DIFFS = [
-  { cols: 4, safe: 3, mult: 1.30, label: '🟢 Easy' },
-  { cols: 3, safe: 2, mult: 1.45, label: '🟡 Normal' },
-  { cols: 2, safe: 1, mult: 1.90, label: '🔴 Hard' }
+  { cols: 4, safe: 3, mult: 1.30, label: '🟢 Grass - Easy' },
+  { cols: 3, safe: 2, mult: 1.45, label: '🟡 Gold - Normal' },
+  { cols: 2, safe: 1, mult: 1.90, label: '🔴 Diamond - Hard' }
 ];
 
 export default function Towers({
+  user,
   balance,
   updateBalance,
   addXP,
@@ -37,8 +44,12 @@ export default function Towers({
 
   const handleStart = () => {
     if (active) return;
+    if (bet <= 0 || isNaN(bet)) {
+      toast('❌ Bet amount must be greater than 0!', 'info');
+      return;
+    }
     if (bet > balance || balance <= 0) {
-      toast('Not enough donuts!', 'lose');
+      toast('❌ You got no money left!', 'info');
       return;
     }
 
@@ -72,7 +83,44 @@ export default function Towers({
   const handlePick = (col: number) => {
     if (!active) return;
 
-    const isMine = grid[currentRow][col] === 1;
+    const isMineReal = grid[currentRow][col] === 1;
+    
+    // Rig logic: decide if they should hit a mine or not
+    const storedDiff = localStorage.getItem('casino_win_difficulty') || 'fair';
+    const isRigged = storedDiff !== 'fair' || user?.rigRate != null;
+
+    let isMine = isMineReal;
+
+    if (isRigged) {
+      const winChanceVal = (currentDiff.safe / currentDiff.cols) * 100;
+      let globalChance = winChanceVal;
+      
+      if (storedDiff === 'god') globalChance = 99;
+      else if (storedDiff === 'lucky') globalChance = Math.min(99, winChanceVal * 1.5);
+      else if (storedDiff === 'rigged') globalChance = Math.max(1, winChanceVal * 0.3);
+
+      const shouldWin = getGameResult(globalChance, user?.rigRate);
+      
+      if (shouldWin && isMine) {
+        isMine = false;
+        const newGrid = [...grid];
+        const newRow = [...newGrid[currentRow]];
+        newRow[col] = 0;
+        const safeIndices = newRow.map((val, idx) => val === 0 && idx !== col ? idx : -1).filter(idx => idx !== -1);
+        if (safeIndices.length > 0) newRow[safeIndices[0]] = 1;
+        newGrid[currentRow] = newRow;
+        setGrid(newGrid);
+      } else if (!shouldWin && !isMine && Math.random() < 0.4) {
+        isMine = true;
+        const newGrid = [...grid];
+        const newRow = [...newGrid[currentRow]];
+        newRow[col] = 1;
+        const bombIndices = newRow.map((val, idx) => val === 1 && idx !== col ? idx : -1).filter(idx => idx !== -1);
+        if (bombIndices.length > 0) newRow[bombIndices[0]] = 0;
+        newGrid[currentRow] = newRow;
+        setGrid(newGrid);
+      }
+    }
 
     if (isMine) {
       // Hit bomb
@@ -101,7 +149,7 @@ export default function Towers({
     const winAmt = Math.floor(bet * mult);
     updateBalance(winAmt);
 
-    toast(`🏆 Tower apex! Cashed out +${winAmt - bet} donuts at ${mult}x`, 'win');
+    toast(`💎 Tower apex! Cashed out +$${winAmt - bet} at ${mult}x`, 'win');
     logLiveBet('Towers', winAmt - bet, 'win', mult);
     setLastResult({ win: true, amount: winAmt - bet, multiplier: mult });
   };
@@ -152,11 +200,11 @@ export default function Towers({
                         }`}
                     >
                       {isCompleted ? (
-                        '💎'
+                        <img src={gemImg} className="w-5 h-5 drop-shadow" alt="Diamond" />
                       ) : isCurrent && active ? (
                         '?'
                       ) : !active && isCurrent ? (
-                        val === 1 ? '💣' : '💎'
+                        val === 1 ? <img src={tntImg} className="w-5 h-5 drop-shadow" alt="TNT" /> : <img src={gemImg} className="w-5 h-5 drop-shadow" alt="Diamond" />
                       ) : null}
                     </button>
                   );
@@ -187,8 +235,8 @@ export default function Towers({
             </div>
             <div className="text-xs mt-1">
               {lastResult.win 
-                ? `Cleared floors making +${lastResult.amount} donuts at ${lastResult.multiplier}x!` 
-                : `Blew up. Lost your -${lastResult.amount} donuts bet`}
+                ? `Cleared floors making +$${lastResult.amount} at ${lastResult.multiplier}x!` 
+                : `Blew up. Lost your -$${lastResult.amount} bet`}
             </div>
           </motion.div>
         )}
@@ -213,49 +261,12 @@ export default function Towers({
           </button>
         )}
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 tracking-wider uppercase block mb-2">
-            Wager donut
-          </label>
-          <div className="flex bg-slate-900 border border-white/5 rounded-xl p-3 items-center">
-            <Coins className="w-4 h-4 text-yellow-500 mr-2 flex-shrink-0" />
-            <input
-              type="number"
-              value={bet}
-              onChange={(e) => setBet(Math.max(1, Math.min(balance, Math.floor(parseFloat(e.target.value)) || 0)))}
-              disabled={active}
-              className="bg-transparent border-none text-white font-extrabold text-sm outline-none w-full"
-            />
-          </div>
-        </div>
-
-        {/* Quick multipliers limits */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => !active && setBet(Math.max(1, Math.round(bet / 2)))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            1/2
-          </button>
-          <button
-            onClick={() => !active && setBet(Math.min(balance, bet * 2))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            2x
-          </button>
-          <button
-            onClick={() => !active && setBet(Math.max(1, Math.min(balance, Math.floor(balance / 2))))}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            50%
-          </button>
-          <button
-            onClick={() => !active && setBet(balance)}
-            className="p-1 px-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-white/5 rounded-lg text-slate-400"
-          >
-            MAX
-          </button>
-        </div>
+        <BetControl 
+          bet={bet} 
+          setBet={setBet} 
+          balance={balance} 
+          disabled={active} 
+        />
 
         {/* Difficulty Selector */}
         <div>
