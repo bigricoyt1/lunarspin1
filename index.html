@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LunarSpin Casino | Minecraft Server Cases & Battles</title>
+    <script>
+      // Process OAuth callback if this window was opened as a login popup
+      if (window.opener && (window.location.hash.includes('access_token') || window.location.search.includes('code'))) {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const searchParams = new URLSearchParams(window.location.search);
+        
+        const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+        const tokenType = hashParams.get('token_type');
+        
+        if (accessToken) {
+          window.opener.postMessage({ 
+            type: 'OAUTH_AUTH_SUCCESS', 
+            accessToken, 
+            tokenType,
+            hash: window.location.hash 
+          }, '*');
+          window.close();
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

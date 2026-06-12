@@ -1,0 +1,6 @@
+{
+  "name": "LunarSpin",
+  "description": "Minecraft Server Casino with Case Battles, Loot Cases, and win rewards!",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
